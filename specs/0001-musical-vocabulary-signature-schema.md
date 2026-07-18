@@ -89,6 +89,7 @@ name:
 tempo:
   min:
   max:
+  default:
 
 defaults:
 
@@ -103,15 +104,16 @@ rhythm_signature:
 harmonic_density:
 ```
 
-| Field | Type |
-|--------|------|
-| tempo.min | integer |
-| tempo.max | integer |
-| defaults.energy | float (0–1) |
-| defaults.complexity | float (0–1) |
-| defaults.groove | float (0–1) |
-| rhythm_signature | kebab-case string |
-| harmonic_density | enum: low \| medium \| high |
+| Field | Type | Required |
+|-------|------|----------|
+| tempo.min | integer | yes |
+| tempo.max | integer | yes |
+| tempo.default | integer | no (baseline.tempo exists only if present) |
+| defaults.energy | float (0–1) | yes |
+| defaults.complexity | float (0–1) | yes |
+| defaults.groove | float (0–1) | yes |
+| rhythm_signature | kebab-case string | yes |
+| harmonic_density | enum: low \| medium \| high | yes |
 
 ### Example
 
@@ -121,6 +123,7 @@ name: hypnotic-techno
 tempo:
   min: 136
   max: 142
+  default: 140
 
 defaults:
 
@@ -186,7 +189,6 @@ Biases are added to genre defaults and the sum is clamped to [0, 1]. This produc
 baseline.energy     = clamp(genre.defaults.energy     + mood.bias.energy,     0, 1)
 baseline.complexity = clamp(genre.defaults.complexity + mood.bias.complexity, 0, 1)
 baseline.groove     = clamp(genre.defaults.groove     + mood.bias.groove,     0, 1)
-baseline.tempo     = midpoint(genre.tempo.min, genre.tempo.max)
 ```
 
 The Intent Resolver never modifies these baselines. It MAY replace a baseline with a concrete value for any field the user did not supply (see Composition Modes). User values at the signature level replace the corresponding baseline field with no clamping.
@@ -339,7 +341,7 @@ Every field of a MusicalSignature has a fixed, field-specific precedence chain. 
 | Field | Chain (highest wins) |
 |-------|----------------------|
 | scale.name | user > resolver |
-| scale.root_pitch_class | user > resolver > scale-default (0 if scale has no default) |
+| scale.root_pitch_class | user > resolver |
 | genre.name | user > resolver |
 | mood.name | user > resolver |
 | performance.tempo | user > resolver > baseline.tempo |
@@ -349,6 +351,8 @@ Every field of a MusicalSignature has a fixed, field-specific precedence chain. 
 
 A field is **filled** by taking the first value present in its chain, top to bottom. If no source supplies a value, validation fails (see Validation Rules).
 
+A scale, by definition, has no implied tonic. The chain for `scale.root_pitch_class` therefore has no baseline: a scale mode (e.g. `phrygian`) does not mean `C phrygian`. If neither user nor resolver supplies a tonic, validation fails explicitly: *"scale.root_pitch_class is required; the scale mode does not imply a tonic."*
+
 ## Baseline computation
 
 Baselines are computed deterministically from genre defaults and mood biases before per-field resolution:
@@ -357,8 +361,15 @@ Baselines are computed deterministically from genre defaults and mood biases bef
 baseline.energy     = clamp(genre.defaults.energy     + mood.bias.energy,     0, 1)
 baseline.complexity = clamp(genre.defaults.complexity + mood.bias.complexity, 0, 1)
 baseline.groove     = clamp(genre.defaults.groove     + mood.bias.groove,     0, 1)
-baseline.tempo      = midpoint(genre.tempo.min, genre.tempo.max)
 ```
+
+`baseline.tempo` exists only if the genre declares an explicit `tempo.default`. When present:
+
+```
+baseline.tempo = genre.tempo.default
+```
+
+When absent, the chain for `performance.tempo` has no baseline and falls directly from resolver to validation. The midpoint of `tempo.min` and `tempo.max` is **not** used as a default: a musical default cannot be derived from a numeric range; it must be declared.
 
 Baselines are immutable for the duration of resolution. The Intent Resolver may fill any field the user did not supply by providing a concrete value; it does not modify baselines.
 
