@@ -131,3 +131,45 @@ Hermes is silent by default. Hermes speaks to Hugo only when:
 ## Pre-push hook
 
 `.githooks/pre-push` is installed via `pnpm setup` (see Task 0.1 of the Day-0 plan) and refuses to push when the working tree has uncommitted changes. To install manually: `git config core.hooksPath .githooks`.
+
+## Additional operational rules (added after first sprint setup)
+
+### Rule 5: Task briefs are copy-pasteable, not narrative
+
+When Hermes dispatches a task to OpenCode, the brief must contain:
+
+- Exact file paths (created or modified).
+- Verbatim quote of the spec's "Behavior" section.
+- The exact test command to verify the work.
+- The exact commit message.
+
+Rationale: a narrative brief ("build a scale parser that...") invites OpenCode to fill in gaps with its own judgement, which drifts from the spec. A copy-pasteable brief keeps Hermes as the only source of interpretation.
+
+### Rule 6: WIP commits are allowed; never abandon them
+
+A `wip:` commit (e.g. `wip(spec-0001): rhythm builder, partial`) is the safe form of "I must stop now." Rules:
+
+- Allowed whenever an agent must interrupt work for any reason.
+- Must be followed up by either: (a) a real `feat:` / `fix:` commit that supersedes it via `git reset --soft` + recommit, or (b) a `wip: drop <reason>` revert if the work is dead.
+- Never left in a branch at sprint-end. Hermes checks for lingering `wip:` commits before proposing "shipped?".
+
+### Rule 7: Resuming interrupted work
+
+If an agent dies mid-task (context loss, crash, handoff to another session), the recovery is:
+
+1. Read the latest `wip:` commit on the relevant branch to see what was done.
+2. Read the corresponding task brief (Hermes → OpenCode message) which is always recoverable from session history or from a stored task file under `tasks/`.
+3. Run the test command. If green, continue. If red, the partial work is broken — revert to the last clean commit and re-dispatch.
+4. Update the task file in `tasks/YYYY-MM-DD-spec-NN.md` with the new state.
+
+Hermes must never say "the previous session didn't tell me what it was doing." The artifacts (wip commits, task files, test runs) are the source of truth.
+
+### Rule 8: Feedback loops terminate in three rounds
+
+If Hermes → OpenCode → Hermes feedback cycle does not converge in three iterations:
+
+1. The fourth round escalates to Hugo with: the spec, the task brief, the three iterations of feedback, and the conflict.
+2. Hugo decides: refine the spec, change the approach, or split the task.
+3. The agent that "loses" the dispute does not retry without explicit go-ahead.
+
+Rationale: an unbounded feedback loop burns tokens and produces incoherent code. The 3-round cap is generous; most tasks converge in 1–2.
