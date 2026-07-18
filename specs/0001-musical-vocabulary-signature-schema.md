@@ -2,7 +2,7 @@
 id: spec-0001
 type: spec
 title: "Musical Vocabulary & Signature Schema"
-status: draft
+status: approved
 version: 0.1.0
 owner: hugo
 created: 2026-07-18
