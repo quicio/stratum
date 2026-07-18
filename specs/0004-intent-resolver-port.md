@@ -18,11 +18,9 @@ tags: [intent, resolver, port, m2]
 
 ## Vision
 
-Define the contract for the Intent Resolver: the component that converts a free-text user intent into a partial `DirectComposition` that fills the missing fields of a `MusicalSignature` resolution.
+Define the TypeScript contract for the Intent Resolver port. The Domain Spec (spec-0001) defines what an Intent Resolver is and the invariants it must satisfy. This Implementation Spec defines the concrete TypeScript interface that any adapter implements.
 
-The Intent Resolver is a **port**, not an implementation. The Domain Spec (spec-0001) defines what an Intent Composition is and what a resolver is allowed to do. This Implementation Spec defines the TypeScript contract that any implementation of the port must satisfy.
-
-An adapter implementing this port (spec-0008) may be a rule-based lookup, an LLM call, a fine-tuned model, or any hybrid. The port is the boundary; adapters are swappable.
+The Intent Resolver is a **port**, not an implementation. Adapters (spec-0008) may be rule-based, LLM-based, fine-tuned, or hybrid. The port is the boundary; adapters are swappable without changes elsewhere.
 
 ---
 
@@ -32,8 +30,7 @@ The port contract lives in the existing `@stratum/vocabulary` package because it
 
 ```
 packages/vocabulary/src/intent/
-  resolver.ts          # IntentResolver type + ResolvedField metadata
-  errors.ts            # ResolutionError variants specific to intent composition
+  resolver.ts          # IntentResolver type
   index.ts             # re-exports
 
 packages/vocabulary/tests/intent/
@@ -52,111 +49,66 @@ The port is a **pure interface**; it owns no I/O. Adapters live in their own pac
 import type { DirectComposition } from '../factory/signature-factory.js';
 
 /**
- * A value produced by an Intent Resolver.
- *
- * The resolver never produces a value marked `user`; user values come
- * exclusively from the caller. The resolver's outputs are marked
- * `resolver` in the resulting provenance (spec-0001).
- */
-export type ResolverValue = 'resolver';
-
-/**
- * A partial DirectComposition with provenance metadata.
- *
- * Each field the resolver supplies is paired with the role `resolver`.
- * The SignatureFactory (spec-0003) walks the partial, fills any
- * missing fields from baselines, and wraps each value in Provenance<T>
- * with the matching source.
- */
-export interface ResolvedComposition {
-  readonly scale?: { name: string; root_pitch_class: number };
-  readonly genre?: { name: string };
-  readonly mood?: { name: string };
-  readonly performance?: Partial<{
-    tempo: number;
-    energy: number;
-    complexity: number;
-    groove: number;
-  }>;
-}
-
-/**
  * The Intent Resolver port.
  *
- * Implementations receive a free-text intent and the partial
- * composition the user already supplied. They return a
- * ResolvedComposition containing only the fields they want to fill.
- * Fields they leave undefined are filled by the SignatureFactory
- * from baselines (or fail validation if no source supplies them).
+ * Receives a free-text intent and the partial composition the user
+ * already supplied. Returns a partial DirectComposition containing
+ * only the fields the resolver wants to fill. Fields it leaves
+ * undefined are filled by the SignatureFactory from baselines (or
+ * fail validation if no source supplies them).
  *
- * Implementations MUST be deterministic for a given (intent, partial)
- * pair. Non-deterministic implementations are forbidden because the
- * M2 ship criterion requires deterministic generation given the
- * same seed (which includes the intent and the partial).
+ * The resolver is a pure function: deterministic for a given
+ * (intent, partial) pair, non-mutating, vocabulary-bound, and
+ * field-filling only. These invariants are defined in spec-0001
+ * (Domain Spec, Intent Resolver Invariants section). This port
+ * concrete-specs the TypeScript shape; the invariants are the
+ * domain's and hold for every language and every adapter.
  *
- * Implementations MUST NOT modify the partial argument. They MUST
- * return a new ResolvedComposition.
- *
- * Implementations MUST NOT invent unknown vocabulary. If the
- * resolver decides a scale/genre/mood name, it must be a name that
- * the VocabularyRepository exposes; otherwise the SignatureFactory
- * will reject it at validation time.
+ * Failure handling is the adapter's choice: an adapter may return
+ * an empty partial (no inferences possible) or throw an Error
+ * with any shape. The SignatureFactory catches the throw and
+ * wraps it as a ResolutionError with the original error attached
+ * as `cause`. The port itself does not define a specific error
+ * type — that is the factory's translation concern, not the
+ * port's contract.
  */
 export interface IntentResolver {
   resolve(
     intent: string,
     partial: Partial<DirectComposition>,
-  ): Promise<ResolvedComposition>;
+  ): Promise<Partial<DirectComposition>>;
 }
 ```
 
----
-
-## Contract Tests
-
-The port's contract is verified by tests that use a **fake implementation** (not a real adapter). The fake lives in `tests/intent/` and exercises every guarantee the port makes.
-
-### Tests required
-
-1. **Identity resolver (no-op)**: returns `{}` for any input. The factory must then fill everything from baselines.
-2. **Deterministic resolver**: given the same `(intent, partial)` pair, returns the same `ResolvedComposition` on every call. Tested with a 100-iteration loop.
-3. **Partial preservation**: a resolver that fills `mood` MUST NOT also fill `scale`, `genre`, or `performance` (the resolver is the only thing that knows the partial; it must return only the fields it wants to add). Tested by inspection of the result.
-4. **No-mutation**: the resolver MUST NOT mutate the `partial` argument. Tested by snapshotting the partial before and after the call.
-5. **Empty intent**: a resolver that supports an empty intent returns `{}`. (This is a contract test on the port, not on a specific resolver.)
-6. **Async-only**: the port returns `Promise<ResolvedComposition>`. A sync implementation is forbidden by the type; the test verifies the return type at compile time.
+The return type is `Partial<DirectComposition>`, not a custom `ResolvedComposition` interface. The factory distinguishes the resolver's contribution from the user's by the precedence chain (resolver values carry `source: 'resolver'` in the provenance), not by a type distinction. One type, one meaning, no duplicate.
 
 ---
 
-## Error Model
+## Contract Guarantees
 
-The port itself does not throw. The resolver may:
+The port is a contract. The guarantees below are **observable**: any implementation that violates them is invalid, regardless of how the violation is detected (unit tests, property tests, fuzzing, manual review).
 
-- **Return an empty `ResolvedComposition`** if it cannot determine anything from the intent. The factory then fills from baselines; the user is responsible for ensuring the baseline produces a valid signature.
-- **Throw** if the intent is structurally unusable (e.g. empty after normalization, contains a known profanity filter trigger). The factory's `intent()` method catches the throw and re-raises it as a `ResolutionError` with reason `'intent-resolver-failed'`.
+- **Determinism**: Repeated invocations with identical `(intent, partial)` inputs MUST produce byte-identical outputs. A resolver that is not deterministic is not a valid Intent Resolver.
 
-```typescript
-// src/intent/errors.ts
+- **Non-mutation**: The resolver MUST NOT mutate the `partial` argument. The caller can rely on the partial being unchanged after the resolver returns.
 
-export class IntentResolverError extends Error {
-  constructor(
-    public readonly reason: 'empty-intent' | 'filter-triggered' | 'internal',
-    message: string,
-  ) {
-    super(message);
-    this.name = 'IntentResolverError';
-  }
-}
-```
+- **Vocabulary-bound**: The resolver MUST NOT introduce scale, genre, or mood names that are not present in the loaded `VocabularyRepository`. The factory validates against the repository after the resolver returns, so a violation surfaces as a `ResolutionError` with reason `unknown-scale` / `unknown-genre` / `unknown-mood`.
 
-The factory (spec-0003) already has a `ResolutionError`. The factory's `intent()` method catches `IntentResolverError` and re-throws as `ResolutionError` with reason `'intent-resolver-failed'`. The original error is attached as `cause`.
+- **Field-filling only**: The resolver's output is consumed by the factory's per-field precedence chain. Resolver values take the place of `baseline` values where the resolver supplies a field. Resolver values MUST NOT override user values. The factory enforces this; the port requires the resolver to behave accordingly.
+
+- **Async-only**: The port returns a `Promise`. Synchronous resolvers are forbidden by the type. This keeps the door open for network-bound adapters (LLM calls) without breaking the contract for pure-function adapters (which simply return `Promise.resolve(...)`).
+
+- **No side effects on the vocabulary**: The resolver does not load, mutate, or re-load the `VocabularyRepository`. The vocabulary is passed implicitly (via the factory's captured reference) but the resolver does not touch it. This keeps the resolver easy to test in isolation.
 
 ---
 
 ## Integration with SignatureFactory
 
-`SignatureFactory.intent()` (spec-0003) takes an `IntentComposition` (which has `intent: string` and optional user fields), calls the resolver, and merges the resolver's `ResolvedComposition` with the user's `DirectComposition`-style fields. User fields always win.
+`SignatureFactory.intent()` (spec-0003) takes an `IntentComposition` (which has `intent: string` and optional user fields), calls the resolver, and merges the resolver's output with the user's `DirectComposition`-style fields. User fields always win.
 
 The merge order is: **user > resolver > baseline**. This is the per-field precedence chain from spec-0001.
+
+The factory wraps any throw from the resolver as a `ResolutionError` with reason `'intent-resolver-failed'` and the original error as `cause`. This is the factory's translation; the port itself does not need to know about `ResolutionError` shapes.
 
 The factory's contract is unchanged. Spec-0003 already declares `IntentResolver` as a constructor parameter; this spec formalizes the type that parameter expects.
 
@@ -168,15 +120,17 @@ The factory's contract is unchanged. Spec-0003 already declares `IntentResolver`
 - **Vocabulary expansion**. A resolver cannot introduce new scales, genres, or moods; it can only select from the existing vocabulary.
 - **Intent parsing rules** (e.g. NLP tokenization, prompt templates). These live in the adapter, not the port.
 - **Caching**. The factory does not cache resolver outputs. Each call is fresh. Caching is an adapter concern.
-- **Streaming**. The resolver returns a single `ResolvedComposition`. Streaming partial updates is not supported.
+- **Streaming**. The resolver returns a single `Partial<DirectComposition>`. Streaming partial updates is not supported.
 - **Multi-turn conversation**. The resolver takes one intent string per call. Multi-turn is out of scope.
+- **Confidence scores**. Each resolved field could carry a confidence (0..1) so the factory can warn on low-confidence inferences. Out of scope for v1.
+- **Error type definition**. The port does not define a specific error class. The factory translates any thrown error to a `ResolutionError` with `cause` preserved. The adapter's error type is the adapter's choice.
 
 ---
 
 ## Dependencies
 
-- spec-0001 — Musical Vocabulary & Signature Schema (Domain Spec: defines Intent Composition, DirectComposition, resolution algorithm, provenance)
-- spec-0003 — SignatureFactory and Domain Types (consumes IntentResolver at construction; defines `DirectComposition` which the resolver returns)
+- spec-0001 — Musical Vocabulary & Signature Schema (Domain Spec: defines Intent Resolver Invariants, Hybrid Composition, provenance, validation)
+- spec-0003 — SignatureFactory and Domain Types (consumes IntentResolver at construction; defines `DirectComposition` which the resolver returns; wraps resolver errors as `ResolutionError`)
 - spec-0008 — Intent Resolver Adapters (Implementation Spec: implements this port for at least one strategy)
 - adr-0001 — Hexagonal Architecture (the port is the boundary between domain and adapter)
 
@@ -185,18 +139,11 @@ The factory's contract is unchanged. Spec-0003 already declares `IntentResolver`
 ## Acceptance Criteria
 
 - `IntentResolver` type lives in `packages/vocabulary/src/intent/resolver.ts`.
-- The interface has a single method `resolve(intent, partial): Promise<ResolvedComposition>`.
-- The interface declares that the resolver is deterministic, non-mutating, and vocabulary-bound.
-- `IntentResolverError` is defined in `packages/vocabulary/src/intent/errors.ts`.
-- The existing `SignatureFactory.intent()` accepts any object satisfying `IntentResolver` (no TypeScript change needed in spec-0003's code; this spec documents the contract that was already implicit).
-- Contract tests pass with a fake implementation:
-  - identity resolver returns `{}`
-  - deterministic over 100 iterations
-  - partial preservation
-  - no mutation of `partial`
-  - empty intent handling
-  - async-only signature
-- The factory wraps `IntentResolverError` as `ResolutionError` with `cause` set (one integration test, in the vocabulary test suite).
+- The interface has a single method `resolve(intent, partial): Promise<Partial<DirectComposition>>`.
+- The TypeDoc comment on the interface references spec-0001's Intent Resolver Invariants section.
+- No custom error class is defined in the port module.
+- Contract tests pass with a fake implementation, verifying each of the six contract guarantees above.
+- The factory's `intent()` integration test (one test in the vocabulary test suite) verifies that a resolver's throw is caught and re-raised as a `ResolutionError` with `cause` set.
 
 ---
 
@@ -205,4 +152,4 @@ The factory's contract is unchanged. Spec-0003 already declares `IntentResolver`
 - **spec-0008** — Intent Resolver Adapters: at least one rule-based adapter (deterministic, no API keys, runs in CI) and optionally an LLM-based adapter (out of CI scope, requires API key).
 - **Multi-turn conversation**: the resolver could accept a session/history. Out of scope for v1.
 - **Streaming partial updates**: useful for very long intents. Out of scope for v1.
-- **Confidence scores**: each resolved field could carry a confidence (0..1) so the factory can warn on low-confidence inferences. Out of scope for v1.
+- **Confidence scores**: see Non-Goals.

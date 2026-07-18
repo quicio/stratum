@@ -4,7 +4,7 @@ type: spec
 kind: domain
 title: "Musical Vocabulary & Signature Schema"
 status: approved
-version: 0.1.0
+version: 0.2.0
 owner: hugo
 created: 2026-07-18
 updated: 2026-07-18
@@ -328,6 +328,24 @@ intent: abandoned temple beneath the sands of Arrakis
 ```
 
 The resolver MUST preserve every user-defined field.
+
+---
+
+## Intent Resolver Invariants
+
+The Intent Resolver is the component that converts a free-text user intent into a partial composition, used in Intent Composition (above) and Hybrid Composition (above).
+
+The following invariants are **domain-level**: they hold for every implementation regardless of the language, the model, or the deployment target.
+
+- **Determinism**: For any given pair of (intent, partial) inputs, the resolver MUST return the same output. Two calls with identical inputs produce byte-identical outputs. This invariant is required by the M2 ship criterion ("deterministic generation given the same seed") and applies transitively to anything that uses the resolver.
+
+- **Non-mutation**: The resolver MUST NOT modify the partial input. It receives a partial composition and returns a new value; the partial is treated as immutable.
+
+- **Vocabulary-bound**: The resolver MUST NOT introduce new vocabulary names. It may only select from the scales, genres, and moods exposed by the loaded `VocabularyRepository`. If a resolver "decides" a scale name that the repository does not know, the resulting signature is invalid; the resolver has failed its contract.
+
+- **Field-filling only**: The resolver's output replaces values in the precedence chain with `source: 'resolver'`. It MUST NOT modify the baseline computation, the user fields, or the validation rules. These are the domain's invariants; the resolver is a passive participant.
+
+A resolver that violates any of these invariants is not a valid Intent Resolver, regardless of how impressive its output is.
 
 Only missing fields may be completed by the resolver.
 
