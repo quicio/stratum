@@ -15,9 +15,17 @@ tags: [m2, generation]
 
 ## Goal
 
-Generate MIDI tracks and audio stems from a musical signature, without touching Live. Produces a `.stratum/` bundle per intent.
+Generate MIDI tracks and audio stems from a `MusicalSignature`, without touching Live. Produces a `.stratum/` bundle per intent.
 
-This milestone makes the vocabulary executable: given a `MusicalSignature`, Stratum produces the artifacts a composer would otherwise hand-author.
+This milestone makes the vocabulary executable: given a signature, Stratum produces the artifacts a composer would otherwise hand-author.
+
+M2 has three internal layers, each with its own spec(s):
+
+1. **Composition Engine** (spec-0005) — consumes a `MusicalSignature`, produces a `Composition` (a structured intermediate representation of a piece: tracks, events, sections).
+2. **Ports** (spec-0004 Intent Resolver Port, spec-0006 MIDI Port) — interfaces only. No implementation, no I/O.
+3. **Adapters** (spec-0007 MIDI Adapter, spec-0008 Intent Resolver Adapters, spec-0009 Audio Stem Renderer) — concrete implementations of ports.
+
+The separation matters: the engine knows nothing about MIDI files or Ableton; adapters know nothing about signatures or vocabulary.
 
 ---
 
@@ -25,21 +33,20 @@ This milestone makes the vocabulary executable: given a `MusicalSignature`, Stra
 
 ### Included
 
-* Intent parsing (natural language → partial signature)
-* MIDI generation pipeline
+* Intent parsing (natural language → partial signature) — via the Intent Resolver port
+* Composition Engine
 
   * Rhythm builder (kick, hat, perc from `genre.rhythm_signature`)
-  * Harmony builder (chords/melody from `scale` + `genre.harmonic_density`)
+  * Harmony builder (notes/melody from `scale` + `genre.harmonic_density`)
   * Ornament builder (from `mood.ornamentation`)
-  * Director (orchestrates builders for an intent)
-* MIDI serialization (notes → `.mid` files)
+  * Director (orchestrates builders for a signature)
+* MIDI serialization (Composition → `.mid` files via the MIDI adapter)
 * Audio stem renderer (drone, pad, FX based on `mood.effects`)
 * Bundle manifest (`bundle.json`) with deterministic SHA-256 per artifact
 * `stratum generate "<intent>"` CLI command
 
 ### Explicitly out of scope
 
-* Intent Resolver port contract (spec-0006 in M1)
 * Live integration (M3)
 * Audio mastering or final mix
 * Multi-track arrangement beyond the bundle's named stems
@@ -67,6 +74,13 @@ These must complete and merge before any M2 implementation code is written.
 * Generation is deterministic given the same seed.
 * Bundle manifest declares: schema version, intent (scale/genre/mood + BPM), seed, MIDI PPQ, length in bars, key signature, tempo, sample rate, bit depth, per-track role, SHA-256 of every binary artifact.
 
+### Layer separation
+
+* Composition Engine depends on no I/O, no port, no adapter implementation. It is testable in isolation.
+* MIDI Port is an interface. The Composition Engine never imports a concrete MIDI library directly.
+* Audio Stem Renderer is an adapter with bounded resource policy.
+* Intent Resolver Port is an interface. Adapters (rule-based, LLM-based, ...) implement it.
+
 ### Interface
 
 * Generation accepts a valid `MusicalSignature` (from M1) as input.
@@ -81,9 +95,11 @@ Unit tests cover:
 * Director produces a complete bundle for representative intents.
 * Bundle manifest SHA-256 matches actual artifacts.
 * Determinism: same seed produces byte-identical artifacts.
+* Composition Engine tests do not import any adapter implementation.
+* Adapter contract tests (mocked port) verify behavior independently of the engine.
 
 ---
 
 ## Exit Criteria
 
-The system can run `stratum generate "techno raw 139 phrygian arrakis"` and produce a self-contained `.stratum/` bundle that another tool can import without contacting Ableton.
+The system can run `stratum generate "techno raw 139 phrygian arrakis"` and produce a self-contained `.stratum/` bundle that another tool can import without contacting Ableton. The Composition Engine and the MIDI adapter are independently testable; the Intent Resolver can be swapped (rule-based vs LLM-based) without engine changes.
