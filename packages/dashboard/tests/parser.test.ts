@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseFrontmatter } from '../src/parser.js';
+import { parseFrontmatter, parseAll } from '../src/parser.js';
 
 const validSpecPath = new URL('./fixtures/specs/0001-sample.md', import.meta.url);
 const missingIdPath = new URL('./invalid-fixtures/spec-missing-id.md', import.meta.url);
@@ -18,5 +18,21 @@ describe('parseFrontmatter', () => {
 
   it('throws on missing required field id', async () => {
     await expect(parseFrontmatter(missingIdPath)).rejects.toThrow(/id/);
+  });
+});
+
+describe('parseAll', () => {
+  it('discovers and parses all .md files under a root', async () => {
+    const root = new URL('./fixtures/', import.meta.url);
+    const docs = await parseAll(root);
+    expect(docs.length).toBe(4);
+    const types = docs.map(d => d.frontmatter.type).sort();
+    expect(types).toEqual(['adr', 'milestone', 'spec', 'task']);
+  });
+
+  it('ignores explicitly named templates', async () => {
+    const root = new URL('./fixtures/', import.meta.url);
+    const docs = await parseAll(root);
+    expect(docs.some(doc => doc.filepath.endsWith('_template.md'))).toBe(false);
   });
 });
