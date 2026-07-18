@@ -2,13 +2,14 @@
 id: task-2026-07-18-day0-scaffold
 type: task
 title: "Day 0 scaffold"
-status: doing
+status: done
 version: 0.1.0
 owner: hugo
 created: 2026-07-18
 updated: 2026-07-18
 milestone: M1
 related: [spec-0001]
+impl_progress: 100
 tags: []
 ---
 
@@ -27,13 +28,13 @@ tags: []
 - [x] T0.10 renderer
 - [x] T0.11 cli entry
 - [x] T0.11b cli integration tests via child_process
-- [ ] T0.12 first real spec/ADR/milestone/task files
-- [ ] T0.13 dashboard renders the real workspace
-- [ ] T0.14 author scaffold scripts (new-spec, new-adr, ...)
-- [ ] T0.15 final commit + status check
+- [x] T0.12 first real spec/ADR/milestone/task files
+- [x] T0.13 dashboard renders the real workspace
+- [x] T0.14 author scaffold scripts (new-spec, new-adr, ...)
+- [x] T0.15 final commit + status check
 
 ## Done
-- (filling in as we go)
+- Day 0 complete: monorepo + 12 dashboard tests green + dashboard renders real workspace
 
 ## Blocked / questions
 - (none)
