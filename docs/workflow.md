@@ -173,3 +173,18 @@ If Hermes → OpenCode → Hermes feedback cycle does not converge in three iter
 3. The agent that "loses" the dispute does not retry without explicit go-ahead.
 
 Rationale: an unbounded feedback loop burns tokens and produces incoherent code. The 3-round cap is generous; most tasks converge in 1–2.
+
+### Rule 9: Hermes handles trivial changes directly
+
+Hermes may bypass the dispatch loop and do a change directly when **all** of the following hold:
+
+- The change is small (a single file, a few lines, well under a 2-5 minute task).
+- The change is cosmetic (whitespace, comments, doc text) OR a single-line bug fix OR a workflow/rule documentation update.
+- There is no irreversible consequence (no force-push, no published artifact, no shared branch).
+- The change does not implement spec behavior (that always goes through the coding agent).
+
+Examples that fit: renaming a symbol in a doc, fixing a typo in `workflow.md`, updating a `tsconfig` field with no semantic change, deleting an unused import.
+
+Examples that do **not** fit: new feature, refactor of an interface, schema change, library upgrade, anything that touches behavior the spec describes.
+
+When Hermes handles a change directly, it still uses a normal commit and follows rules 1, 4, and 6 (commit first, clean push, no abandoned wip). The only thing skipped is the dispatch-to-coding-agent round trip.
