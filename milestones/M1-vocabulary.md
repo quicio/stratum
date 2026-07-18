@@ -15,7 +15,7 @@ tags: [m1, vocabulary]
 
 ## Goal
 
-Implement the foundational musical domain defined by **spec-0001**.
+Implement the foundational musical domain defined by **spec-0001**, including the canonical vocabulary, deterministic signature resolution, validation, and provenance required for every composition workflow.
 
 This milestone delivers the canonical musical vocabulary, deterministic signature resolution, and validation required for every subsequent composition workflow.
 
