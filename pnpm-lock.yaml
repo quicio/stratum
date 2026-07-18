@@ -21,7 +21,7 @@ importers:
         specifier: 2.1.4
         version: 2.1.4(@types/node@22.9.0)
 
-  packages/dashboard:
+  packages/speck:
     dependencies:
       chalk:
         specifier: 5.3.0

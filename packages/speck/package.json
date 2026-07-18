@@ -1,7 +1,7 @@
 {
-  "name": "@stratum/dashboard",
+  "name": "@quicio/speck",
   "version": "0.1.0",
-  "private": true,
+  "description": "Spec/ADR/milestone/task dashboard for spec-driven projects. Reads Markdown with frontmatter and renders an ASCII dashboard.",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -12,8 +12,13 @@
     }
   },
   "bin": {
-    "stratum-status": "dist/cli.js"
+    "speck": "dist/cli.js"
   },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "test": "vitest run",
@@ -21,6 +26,22 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "biome lint src tests vitest.config.ts",
     "start": "node dist/cli.js"
+  },
+  "keywords": [
+    "spec",
+    "specification",
+    "spec-driven",
+    "adr",
+    "milestone",
+    "task",
+    "tracker",
+    "dashboard",
+    "markdown",
+    "quicio"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=22.23.1"
   },
   "dependencies": {
     "chalk": "5.3.0",
