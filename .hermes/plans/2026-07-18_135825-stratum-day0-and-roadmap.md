@@ -1513,9 +1513,7 @@ git add packages/dashboard && git commit -m "feat(dashboard): cli entry walks wo
 
 **Files:**
 - Create: `/Users/hugo/Proyectos/stratum/packages/dashboard/tests/cli.test.ts`
-- Create: `/Users/hugo/Proyectos/stratum/packages/dashboard/tests/fixtures/workspace/{specs,adr,milestones,tasks}/.gitkeep`
 - Create: `/Users/hugo/Proyectos/stratum/packages/dashboard/tests/fixtures/workspace/specs/0001-fixture.md`
-- Create: `/Users/hugo/Proyectos/stratum/packages/dashboard/tests/fixtures/workspace/specs/0001-broken.md`
 
 **Step 1:** Write the failing test `tests/cli.test.ts`:
 
@@ -1579,7 +1577,6 @@ describe('cli (integration)', () => {
   });
 
   it('reports every invalid document via AggregateError and exits non-zero', () => {
-    // Write a spec with an invalid status to trigger zod failure
     writeFileSync(join(FIXTURE_ROOT, 'specs/0001-broken.md'), `---
 id: spec-9999
 type: spec
@@ -1947,7 +1944,7 @@ tags: []
 - [x] T0.9 aggregator
 - [x] T0.10 renderer
 - [x] T0.11 cli entry
-- [ ] T0.11b cli integration tests via child_process
+- [x] T0.11b cli integration tests via child_process
 - [ ] T0.12 first real spec/ADR/milestone/task files
 - [ ] T0.13 dashboard renders the real workspace
 - [ ] T0.14 author scaffold scripts (new-spec, new-adr, ...)
@@ -2150,14 +2147,14 @@ After Day 0, M1 builds the actual vocabulary layer. Skeleton only here; full det
 | spec-0011 | Audio stem renderer (drone, pad, fx) |
 | spec-0012 | End-to-end: `stratum generate "<intent>"` → `.stratum/` bundle |
 
-**Mandatory pre-M2 spikes** (must complete and merge before spec-0010):
+**M2 ship criterion**: Without touching Live, `stratum generate "techno raw 139 phrygian arrakis"` produces a `.stratum/` directory containing a `bundle.json` manifest plus `drums.mid`, `bass.mid`, `lead.mid`, `drone.wav`, `pad.wav`. The bundle must declare: bundle schema version, `intent` (scale/genre/mood + BPM), `seed`, MIDI PPQ, length in bars, key signature, tempo, sample rate, bit depth, per-track role, and SHA-256 of every binary artifact. Generation must be deterministic given the same seed.
+
+**Mandatory pre-M2 spikes** (must complete and merge before spec-0010 / spec-0011):
 
 | Spike ID | Title | Required ADR | Deliverable |
 |---|---|---|---|
 | spec-0010-a | MIDI library selection: `midi-writer-js` vs `easymidi` | adr-0010-midi-library.md | Locked library choice + reason the rejected option loses, captured before any generator code |
 | spec-0011-a | Audio stem renderer feasibility: render (FFmpeg / SoX / node) vs model (HeartMuLa / Suno) | adr-0011-audio-renderer.md | Locked renderer choice OR explicit decision to ship a deterministic placeholder first and gate real audio on a second spike |
-
-**M2 ship criterion**: Without touching Live, `stratum generate "techno raw 139 phrygian arrakis"` produces a `.stratum/` directory containing a `bundle.json` manifest plus `drums.mid`, `bass.mid`, `lead.mid`, `drone.wav`, `pad.wav`. The bundle must declare: bundle schema version, `intent` (scale/genre/mood + BPM), `seed`, MIDI PPQ, length in bars, key signature, tempo, sample rate, bit depth, per-track role, and SHA-256 of every binary artifact. Generation must be deterministic given the same seed.
 
 ---
 
