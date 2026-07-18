@@ -20,6 +20,7 @@ export const frontmatterSchema = z.discriminatedUnion('type', [
     ...common,
     id: z.string().regex(/^spec-\d{4}$/),
     type: z.literal('spec'),
+    kind: z.enum(['domain', 'implementation']).optional(),
     status: z.enum(['draft', 'approved', 'in_progress', 'stable', 'deprecated']),
     milestone: z.string().regex(/^M\d+$/),
     impl_progress: progress,

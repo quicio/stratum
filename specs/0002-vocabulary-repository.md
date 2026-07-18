@@ -1,6 +1,7 @@
 ---
 id: spec-0002
 type: spec
+kind: implementation
 title: "Vocabulary Repository"
 status: approved
 version: 0.1.0

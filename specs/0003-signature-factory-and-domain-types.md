@@ -1,6 +1,7 @@
 ---
 id: spec-0003
 type: spec
+kind: implementation
 title: "SignatureFactory and Domain Types"
 status: draft
 version: 0.1.0

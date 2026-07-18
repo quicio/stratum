@@ -1,6 +1,7 @@
 ---
 id: spec-0001
 type: spec
+kind: domain
 title: "Musical Vocabulary & Signature Schema"
 status: approved
 version: 0.1.0
