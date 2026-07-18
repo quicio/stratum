@@ -10,7 +10,7 @@ created: 2026-07-18
 updated: 2026-07-18
 milestone: M1
 related: [spec-0001, spec-0002]
-impl_progress: 0
+impl_progress: 100
 tags: [vocabulary, factory, m1, domain, typescript]
 ---
 
