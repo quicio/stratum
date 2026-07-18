@@ -3,7 +3,7 @@ id: spec-0004
 type: spec
 kind: implementation
 title: "Intent Resolver Port"
-status: draft
+status: approved
 version: 0.1.0
 owner: hugo
 created: 2026-07-18
