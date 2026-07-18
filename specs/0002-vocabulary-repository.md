@@ -17,9 +17,11 @@ tags: [vocabulary, repository, m1]
 
 ## Vision
 
-The Vocabulary Repository loads, validates, and exposes the canonical musical vocabulary defined by spec-0001 (scales, genres, moods) from the on-disk YAML files under vocabulary/ to the rest of the system.
+The Vocabulary Repository loads, validates, and exposes the canonical musical vocabulary defined by spec-0001 (scales, genres, moods) from the on-disk YAML files under `vocabulary/` to the rest of the system.
 
 The repository is the single boundary between the YAML files (data) and the domain (code). It guarantees that no partially-loaded, invalid, or unvalidated vocabulary ever enters the domain.
+
+The repository is the only component in the system that reads vocabulary YAML files. YAML parsing (if delegated internally) happens behind the repository boundary; no external component parses vocabulary YAML files.
 
 ---
 
@@ -64,43 +66,34 @@ The repository exposes three readonly collections after a successful load:
 - `genres`: `ReadonlyMap<string, Genre>` — keyed by genre name
 - `moods`: `ReadonlyMap<string, Mood>` — keyed by mood name
 
-`Scale`, `Genre`, and `Mood` are the domain types defined by spec-0001 (their exact TypeScript shape is part of spec-0003 SignatureFactory; the repository deals in the validated domain objects, not in YAML ASTs).
+`Scale`, `Genre`, and `Mood` are the domain objects defined by spec-0001 (their exact representation is part of spec-0003 SignatureFactory; the repository deals in the validated domain objects, not in YAML ASTs).
 
-The collections are exposed as TypeScript getters, not methods, to make the read-only intent explicit at every call site.
+The collections are exposed as readonly properties, not methods, to make the read-only intent explicit at every call site.
 
 ---
 
-## Constructor
+## Constructor and `load`
 
-`new VocabularyRepository(rootDir: string, options?: { logger?: Logger })`
+`VocabularyRepository` is not directly constructible. The only way to obtain an instance is through the static factory method:
 
-The constructor is synchronous and throws on error. If construction fails, no `VocabularyRepository` instance is returned; the caller never holds a reference to a half-initialized repository.
+```
+static async load(rootDir: string): Promise<VocabularyRepository>
+```
 
-On construction:
+`load` performs, in order:
 
 1. Resolve `rootDir` to an absolute path. Throw with a descriptive error if `rootDir` does not exist or is not a directory.
 2. Verify that `scales/`, `genres/`, and `moods/` exist under `rootDir`. Throw with a descriptive error listing the missing paths if any is absent.
 3. Load and validate all files. Throw with a `VocabularyLoadError` (see Error Model) if any file fails to load or validate.
-4. On success, expose the loaded collections.
+4. On success, return a fully initialized `VocabularyRepository` instance.
 
-The repository never exposes a partial repository. There is no in-between state.
+If `load` fails, no `VocabularyRepository` instance is returned. The caller never holds a reference to a half-initialized repository. Tests of the repository therefore use real on-disk fixtures (success and failure cases alike), not mocks or injected loaders.
+
+The implementation may define additional non-public constructors for internal use; they are not part of this spec.
 
 ---
 
-### Logger
-
-`Logger` is the standard console-shaped interface:
-
-```
-interface Logger {
-  debug(...args: unknown[]): void
-  info(...args: unknown[]): void
-  warn(...args: unknown[]): void
-  error(...args: unknown[]): void
-}
-```
-
-The default, when no logger is provided, is `console`. The repository never throws based on logger availability and never depends on the logger being present.
+## Validation
 
 Each loaded YAML file is validated against the schema defined by spec-0001. Validation failures MUST include:
 
@@ -109,6 +102,10 @@ Each loaded YAML file is validated against the schema defined by spec-0001. Vali
 - The valid alternatives when the error is 'unknown vocabulary' (relevant for cross-references).
 
 Validation MUST run on every load, including reload. The repository does not trust the YAML files on disk.
+
+### Diagnostics
+
+The implementation may emit diagnostic logs during load and validation. Logging is a runtime concern, not part of the architectural contract; the spec does not define a logger interface or a logging policy. Callers cannot rely on logs being emitted or on their format.
 
 ---
 
@@ -140,9 +137,14 @@ Cross-references that the spec-0001 schema declares (such as Mood.effects refere
 
 ---
 
-## Concurrency
+## Atomicity invariants
 
-A load is atomic. Concurrent calls to reload() on the same instance are serialized; the second call sees the result of the first. A load cannot interleave with a read.
+The following invariants are observable contract. How they are implemented is an implementation detail.
+
+- A load is atomic. External observers never see a partially loaded repository.
+- A load and a read cannot interleave. A read either sees the previous complete state or the new complete state.
+- Two concurrent `load` or `reload` calls on the same instance do not corrupt internal state. The second call sees the result of the first.
+- A failed load does not mutate the previously exposed state.
 
 ---
 
@@ -150,9 +152,11 @@ A load is atomic. Concurrent calls to reload() on the same instance are serializ
 
 - Resolution of cross-references (handled by future specs).
 - Mutation of vocabulary (vocabulary is immutable for the process lifetime).
-- Hot-reload via file watcher (callers must invoke reload() explicitly).
+- Hot-reload via file watcher (callers must invoke `reload()` explicitly).
 - Caching across processes (the repository loads from disk every time the process starts; in-memory caching only).
 - Mutation, indexing, or search of vocabulary items (callers receive readonly maps and iterate as needed).
+- Defining a logger interface or logging policy (see Diagnostics).
+- Specifying how YAML files are parsed (the parser is an implementation detail behind the repository boundary).
 
 ---
 
