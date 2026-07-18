@@ -30,7 +30,7 @@ Its primary responsibility is to produce a validated **MusicalSignature**, the c
 - Vocabulary definitions are immutable.
 - MusicalSignature is deterministic.
 - Validation never invents values.
-- Intent Resolution may infer missing values.
+- Intent Resolution completes missing fields; it does not modify computed baselines.
 - Explicit user values always take precedence.
 
 ---
@@ -180,15 +180,16 @@ bias:
 
 ### Bias application
 
-Biases are added to defaults and clamped to [0, 1] at resolution time.
+Biases are added to genre defaults and the sum is clamped to [0, 1]. This produces the **baseline** for each performance axis.
 
 ```
-performance.energy   = clamp(defaults.energy   + bias.energy   + intent.delta.energy,   0, 1)
-performance.complexity = clamp(defaults.complexity + bias.complexity + intent.delta.complexity, 0, 1)
-performance.groove   = clamp(defaults.groove   + bias.groove   + intent.delta.groove,   0, 1)
+baseline.energy     = clamp(genre.defaults.energy     + mood.bias.energy,     0, 1)
+baseline.complexity = clamp(genre.defaults.complexity + mood.bias.complexity, 0, 1)
+baseline.groove     = clamp(genre.defaults.groove     + mood.bias.groove,     0, 1)
+baseline.tempo     = midpoint(genre.tempo.min, genre.tempo.max)
 ```
 
-A user-defined value at the signature level replaces the computed value entirely (no clamp applied to user overrides).
+The Intent Resolver never modifies these baselines. It MAY replace a baseline with a concrete value for any field the user did not supply (see Composition Modes). User values at the signature level replace the corresponding baseline field with no clamping.
 
 ### Example
 
@@ -325,21 +326,52 @@ intent: abandoned temple beneath the sands of Arrakis
 
 The resolver MUST preserve every user-defined field.
 
-Only missing fields may be inferred.
+Only missing fields may be completed by the resolver.
 
 ---
 
 # Signature Resolution
 
-Resolution order is deterministic.
+Every field of a MusicalSignature has a fixed, field-specific precedence chain. Resolution is deterministic.
 
-1. Genre defaults
-2. Mood biases
-3. Intent inference
-4. User overrides
-5. Validation
+## Per-field precedence chains
 
-Explicit user values always have highest priority.
+| Field | Chain (highest wins) |
+|-------|----------------------|
+| scale.name | user > resolver |
+| scale.root_pitch_class | user > resolver > scale-default (0 if scale has no default) |
+| genre.name | user > resolver |
+| mood.name | user > resolver |
+| performance.tempo | user > resolver > baseline.tempo |
+| performance.energy | user > resolver > baseline.energy |
+| performance.complexity | user > resolver > baseline.complexity |
+| performance.groove | user > resolver > baseline.groove |
+
+A field is **filled** by taking the first value present in its chain, top to bottom. If no source supplies a value, validation fails (see Validation Rules).
+
+## Baseline computation
+
+Baselines are computed deterministically from genre defaults and mood biases before per-field resolution:
+
+```
+baseline.energy     = clamp(genre.defaults.energy     + mood.bias.energy,     0, 1)
+baseline.complexity = clamp(genre.defaults.complexity + mood.bias.complexity, 0, 1)
+baseline.groove     = clamp(genre.defaults.groove     + mood.bias.groove,     0, 1)
+baseline.tempo      = midpoint(genre.tempo.min, genre.tempo.max)
+```
+
+Baselines are immutable for the duration of resolution. The Intent Resolver may fill any field the user did not supply by providing a concrete value; it does not modify baselines.
+
+## Resolution algorithm
+
+For each field of the MusicalSignature:
+
+1. Compute baselines (once, before per-field resolution).
+2. For each field, walk its precedence chain top to bottom and take the first present value.
+3. Validate the chosen value against field constraints (tempo range, register enum, etc.).
+4. Record the provenance of the chosen value (`source: user | resolver | baseline`).
+
+The algorithm is total: every required field MUST resolve to exactly one source. If any field has no source, validation fails before the signature is constructed.
 
 ---
 
@@ -354,9 +386,9 @@ source:
 
   user
 
-  inferred
+  resolver
 
-  default
+  baseline
 ```
 
 Example
@@ -377,7 +409,7 @@ genre:
 
     name: hypnotic-techno
 
-  source: inferred
+  source: resolver
 
 mood:
 
@@ -385,13 +417,13 @@ mood:
 
     name: arrakis
 
-  source: inferred
+  source: resolver
 
 performance:
 
   tempo:
     value: 140
-    source: default
+    source: baseline
 
   energy:
     value: 0.82
@@ -399,11 +431,11 @@ performance:
 
   complexity:
     value: 0.35
-    source: default
+    source: baseline
 
   groove:
     value: 0.91
-    source: inferred
+    source: resolver
 ```
 
 ---
@@ -445,13 +477,14 @@ Only an Intent Resolver may infer missing fields before validation.
 # Acceptance Criteria
 
 - MusicalSignature can be built from Direct Composition.
-- MusicalSignature can be built from Intent Composition.
+- MusicalSignature can be built from Intent Composition (resolver completes missing fields only).
 - Hybrid Composition preserves explicit user values.
-- Signature resolution is deterministic.
-- Every resolved field stores provenance.
+- Signature resolution is deterministic; per-field precedence chains are exactly as specified.
+- Every resolved field stores provenance (`user`, `resolver`, or `baseline`).
 - Unknown vocabulary generates descriptive validation errors.
-- Tempo conflicts emit warnings.
+- Tempo conflicts clamp to the nearest valid value and emit a warning.
 - Validator never invents missing values.
+- Resolution algorithm completes without producing a signature if any required field has no source.
 - YAML repository contains at least:
   - 3 scales
   - 2 genres
