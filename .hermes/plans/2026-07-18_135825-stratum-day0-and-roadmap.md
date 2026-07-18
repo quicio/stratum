@@ -1,6 +1,19 @@
 # Stratum — Implementation Plan (Day 0 + Roadmap to M3)
 
-> **For Hermes:** Use subagent-driven-development skill to execute this plan task-by-task. Each task is a self-contained bite (2-5 min) with explicit TDD cycle.
+> **For Hermes:** Use subagent-driven-development skill to execute this plan task-by-task. Each task is a self-contained bite with an explicit TDD cycle. The correction rules below are mandatory and supersede any contradictory example in this document.
+
+## Mandatory execution guardrails
+
+Before implementing a task, Hermes must verify that its tests exercise the behavior named by the test and that the production artifact can run from a clean checkout. In particular:
+
+1. Build only `src/` into `dist/`; never emit tests into the published package layout.
+2. Use Node-native ESM resolution (`NodeNext`) and smoke-test the emitted CLI with Node.
+3. Treat frontmatter as untrusted input. Validate types, type-specific status, IDs, dates, progress ranges, duplicate IDs, and cross-references at runtime.
+4. Never swallow malformed document errors. Ignore only explicitly named templates and report every other error with its path.
+5. Workspace discovery must use an unambiguous marker and required directories; an empty parse is not proof that the workspace was found.
+6. Aggregation must be invariant to filesystem iteration order.
+7. Day 0 is not complete until CI passes install, lint, typecheck, tests, build, package-layout checks, and a CLI smoke test from a clean checkout.
+8. Do not begin M2 audio generation or M3 Live mutation until the corresponding contract and feasibility spikes described near the roadmap are resolved.
 
 ## Goal
 
@@ -43,8 +56,11 @@ stratum/
 ├── .editorconfig
 ├── .nvmrc                                # 22.23.1
 ├── .npmrc                                # strict-peer-deps
+├── biome.json                            # lint + format policy
 ├── README.md
 ├── AGENTS.md                             # AI conventions: TDD, specs-first, TS, hexagonal
+├── .github/
+│   └── workflows/ci.yml                  # clean install, lint, types, tests, build, smoke
 │
 ├── apps/
 │   └── cli/                              # entry: `stratum generate`, `stratum push`, `stratum status`
@@ -123,6 +139,7 @@ stratum/
 │   │   │   └── index.ts
 │   │   ├── tests/
 │   │   └── package.json
+│   │   └── tsconfig.build.json            # emits src only
 │   │
 │   └── shared/                           # common types, errors
 │       ├── src/
@@ -198,7 +215,16 @@ tags: [vocabulary, music]
 | milestone  | `planned` · `active` · `shipped` · `cancelled`           |
 | task       | `todo` · `doing` · `done` · `blocked` · `cancelled`       |
 
-The dashboard parser only reads these fields. Anything in the body is human documentation.
+The dashboard parser only reads these fields. Anything in the body is human documentation. Files whose basename starts with `_` are templates and must be ignored explicitly. Every other `.md` file in a tracked directory must either validate or make the command fail with a path-specific diagnostic.
+
+Validation invariants:
+
+- Frontmatter is a discriminated union keyed by `type`; each type accepts only its own status enum.
+- `id` format must match `type`, IDs must be globally unique, and spec/task milestone references must exist.
+- `created` and `updated` are normalized to `YYYY-MM-DD` strings immediately after YAML parsing.
+- `related` and `tags` are arrays of strings; all `related` IDs must exist unless explicitly marked external.
+- `impl_progress`, when present, is an integer in `0..100`.
+- The filename ID and frontmatter ID must agree according to the naming convention.
 
 ---
 
@@ -206,7 +232,7 @@ The dashboard parser only reads these fields. Anything in the body is human docu
 
 | Milestone | Specs | Definition of "shipped" |
 |---|---|---|
-| **M1 — Vocabulary** | 0001..0005 | CLI shows dashboard; user can edit YAML vocab and dashboard reflects changes; round-trip parse ≥ 50 specs/ADRs/milestones/tasks without error |
+| **M1 — Vocabulary** | 0001..0005 | CLI shows document progress; a dedicated vocabulary validator inventories hand-authored YAML; round-trip parse ≥ 50 valid documents and reports invalid documents without data loss |
 | **M2 — Generation** | 0006..0012 | `stratum generate "techno raw 139 phrygian arrakis"` produces a `.stratum/` bundle (MIDI files + audio stems) without touching Live |
 | **M3 — Live bridge** | 0013..0020 | `stratum push` against a running Live 12 sends clips + device params via OSC; FileAdapter parses a sample `.als` and reports state |
 
@@ -214,7 +240,7 @@ The dashboard parser only reads these fields. Anything in the body is human docu
 
 # Day 0 — Sprint 0: Tracking System + Monorepo Skeleton
 
-The first 15 tasks produce a runnable monorepo with a working dashboard. **No musical code yet.**
+The 16 tasks produce a runnable monorepo with a working dashboard and CI. **No musical code yet.**
 
 ---
 
@@ -229,6 +255,7 @@ The first 15 tasks produce a runnable monorepo with a working dashboard. **No mu
 - Create: `/Users/hugo/Proyectos/stratum/.editorconfig`
 - Create: `/Users/hugo/Proyectos/stratum/.nvmrc`
 - Create: `/Users/hugo/Proyectos/stratum/.npmrc`
+- Create: `/Users/hugo/Proyectos/stratum/biome.json`
 
 **Step 1:** Create `pnpm-workspace.yaml`:
 
@@ -247,8 +274,8 @@ packages:
 **Step 3:** Create `.npmrc`:
 
 ```
-strict-peer-dependencies=false
-auto-install-peers=true
+strict-peer-dependencies=true
+auto-install-peers=false
 engine-strict=true
 ```
 
@@ -329,8 +356,10 @@ out/
     "build": "pnpm -r build",
     "test": "pnpm -r test",
     "test:watch": "pnpm -r test:watch",
-    "lint": "pnpm -r lint",
+    "lint": "biome lint .",
+    "format:check": "biome format .",
     "typecheck": "pnpm -r typecheck",
+    "prestatus": "pnpm --filter @stratum/dashboard build",
     "status": "pnpm --filter @stratum/dashboard start",
     "new:spec": "bash scripts/new-spec.sh",
     "new:adr": "bash scripts/new-adr.sh",
@@ -338,6 +367,7 @@ out/
     "new:task": "bash scripts/new-task.sh"
   },
   "devDependencies": {
+    "@biomejs/biome": "1.9.4",
     "typescript": "5.6.3",
     "vitest": "2.1.4",
     "@types/node": "22.9.0"
@@ -345,7 +375,19 @@ out/
 }
 ```
 
-**Step 7:** Verify `pnpm` is happy:
+**Step 7:** Create `biome.json`:
+
+```json
+{
+  "$schema": "https://biomejs.dev/schemas/1.9.4/schema.json",
+  "organizeImports": { "enabled": true },
+  "formatter": { "enabled": true, "indentStyle": "space", "indentWidth": 2 },
+  "linter": { "enabled": true, "rules": { "recommended": true } },
+  "files": { "ignore": ["dist", "coverage", "node_modules"] }
+}
+```
+
+**Step 8:** Verify `pnpm` is happy:
 
 ```bash
 cd /Users/hugo/Proyectos/stratum && pnpm install
@@ -353,7 +395,7 @@ cd /Users/hugo/Proyectos/stratum && pnpm install
 
 Expected: creates `node_modules/` and `pnpm-lock.yaml` with no errors.
 
-**Step 8:** Commit:
+**Step 9:** Commit:
 
 ```bash
 cd /Users/hugo/Proyectos/stratum && git add . && git commit -m "chore: scaffold pnpm monorepo root"
@@ -374,8 +416,8 @@ cd /Users/hugo/Proyectos/stratum && git add . && git commit -m "chore: scaffold 
 {
   "compilerOptions": {
     "target": "ES2023",
-    "module": "ESNext",
-    "moduleResolution": "Bundler",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
     "lib": ["ES2023"],
     "types": ["node"],
 
@@ -395,9 +437,7 @@ cd /Users/hugo/Proyectos/stratum && git add . && git commit -m "chore: scaffold 
 
     "declaration": true,
     "declarationMap": true,
-    "sourceMap": true,
-    "outDir": "dist",
-    "rootDir": "src"
+    "sourceMap": true
   },
   "exclude": ["node_modules", "dist", "tests"]
 }
@@ -413,7 +453,51 @@ git add tsconfig.base.json && git commit -m "chore: add strict typescript base c
 
 ---
 
-### Task 0.3: README + AGENTS.md
+### Task 0.3: Continuous integration workflow
+
+**Objective:** Guarantee that Day 0 cannot be tagged without a passing CI on a clean checkout.
+
+**Files:**
+- Create: `/Users/hugo/Proyectos/stratum/.github/workflows/ci.yml`
+
+**Step 1:** Write `.github/workflows/ci.yml`:
+
+```yaml
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 8.15.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.23.1
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm test -- --coverage
+      - run: pnpm build
+      - run: pnpm prestatus
+      - run: node packages/dashboard/dist/cli.js
+```
+
+**Step 2:** Commit:
+
+```bash
+git add .github && git commit -m "ci: install, lint, typecheck, test, build, smoke on push and PR"
+```
+
+---
+
+### Task 0.4: README + AGENTS.md
 
 **Objective:** Document what Stratum is and the rules every AI agent must follow.
 
@@ -486,7 +570,7 @@ All design lives in `specs/`, `adr/`, `milestones/`, `tasks/`. Standardized fron
 1. **Code in English (ASCII).** Spanish is for game narrative, user-facing copy, and personal communication only. NEVER use Spanish, Chinese, Portuguese, or other languages in code, comments, type names, or variable names. ASCII only.
 2. **No production code without a failing test first.** This is non-negotiable. See test-driven-development skill.
 3. **Spec before code.** A feature without a spec is technical debt. Create the spec first (or refactor existing spec). Code implementing a non-existent spec is rejected.
-4. **Domain core stays pure.** `packages/live-bridge/src/domain/` and `packages/vocabulary/src/` must NOT import from `node_modules` except for type-only or pure-functional deps (`gray-matter`, `chalk`). NO imports from adapter implementations, NO I/O, NO `fs`, NO `process`. The domain is testable without any external state.
+4. **Domain core stays pure.** `packages/live-bridge/src/domain/` and the musical model inside `packages/vocabulary/src/` must not import runtime dependencies, adapter implementations, Node I/O, `fs`, or `process`. YAML loading is an explicit loader boundary: the loader may use I/O, but it must return pure model objects and live outside the domain directories. Terminal rendering belongs in the CLI/dashboard. Type-only imports are allowed when they do not create runtime coupling.
 5. **Adapters implement ports.** Every adapter (`packages/*/src/adapters/*`) must `implements` an interface from `ports/`. If it doesn't fit an existing port, add the port first.
 6. **Frequent commits.** Commit every task with conventional commits: `feat:`, `fix:`, `chore:`, `docs:`, `test:`, `refactor:`.
 7. **No scope creep.** A task is what the spec says. If you spot adjacent work, write a new spec, do NOT do it silently.
@@ -517,7 +601,7 @@ All design lives in `specs/`, `adr/`, `milestones/`, `tasks/`. Standardized fron
 ## What NOT to do
 
 - Don't add dependencies without checking if a stdlib / sibling-package solution exists.
-- Don't `console.log` in committed code. Use a logger (`pino` or built-in `console` wrapper) or remove.
+- Don't add ad-hoc `console.log` calls in libraries. CLI entrypoints may write intentional user output to stdout and diagnostics to stderr through a small output boundary.
 - Don't commit `.env`, `node_modules`, `dist`, `.stratum/` (already in `.gitignore`).
 - Don't write a README in Spanish. English only.
 ```
@@ -530,13 +614,14 @@ git add README.md AGENTS.md && git commit -m "docs: add README and AGENTS conven
 
 ---
 
-### Task 0.4: Dashboard package — `package.json` + `tsconfig.json`
+### Task 0.5: Dashboard package — `package.json` + `tsconfig.json`
 
 **Objective:** Create the `@stratum/dashboard` workspace package skeleton.
 
 **Files:**
 - Create: `/Users/hugo/Proyectos/stratum/packages/dashboard/package.json`
 - Create: `/Users/hugo/Proyectos/stratum/packages/dashboard/tsconfig.json`
+- Create: `/Users/hugo/Proyectos/stratum/packages/dashboard/tsconfig.build.json`
 - Create: `/Users/hugo/Proyectos/stratum/packages/dashboard/vitest.config.ts`
 - Create: `/Users/hugo/Proyectos/stratum/packages/dashboard/tests/.gitkeep`
 
@@ -546,14 +631,29 @@ git add README.md AGENTS.md && git commit -m "docs: add README and AGENTS conven
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "outDir": "dist",
+    "noEmit": true,
     "rootDir": "."
   },
-  "include": ["src/**/*", "tests/**/*"]
+  "include": ["src/**/*", "tests/**/*", "vitest.config.ts"]
 }
 ```
 
-**Step 2:** Create `packages/dashboard/package.json`:
+**Step 2:** Create `packages/dashboard/tsconfig.build.json` so package output contains only production sources:
+
+```json
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "rootDir": "src",
+    "outDir": "dist"
+  },
+  "include": ["src/**/*"],
+  "exclude": ["tests/**/*", "vitest.config.ts"]
+}
+```
+
+**Step 3:** Create `packages/dashboard/package.json`:
 
 ```json
 {
@@ -573,15 +673,17 @@ git add README.md AGENTS.md && git commit -m "docs: add README and AGENTS conven
     "stratum-status": "dist/cli.js"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.build.json",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "biome lint src tests vitest.config.ts",
     "start": "node dist/cli.js"
   },
   "dependencies": {
     "chalk": "5.3.0",
-    "gray-matter": "4.0.3"
+    "gray-matter": "4.0.3",
+    "zod": "3.23.8"
   },
   "devDependencies": {
     "@types/node": "22.9.0",
@@ -591,7 +693,7 @@ git add README.md AGENTS.md && git commit -m "docs: add README and AGENTS conven
 }
 ```
 
-**Step 3:** Create `packages/dashboard/vitest.config.ts`:
+**Step 4:** Create `packages/dashboard/vitest.config.ts`:
 
 ```typescript
 import { defineConfig } from 'vitest/config';
@@ -605,7 +707,7 @@ export default defineConfig({
 });
 ```
 
-**Step 4:** Create empty `tests/.gitkeep`:
+**Step 5:** Create empty `tests/.gitkeep`:
 
 ```bash
 touch /Users/hugo/Proyectos/stratum/packages/dashboard/tests/.gitkeep
@@ -627,15 +729,16 @@ git add packages/dashboard && git commit -m "feat(dashboard): scaffold package"
 
 ---
 
-### Task 0.5: Dashboard — first failing test for frontmatter parser
+### Task 0.6: Dashboard — first failing test for frontmatter parser
 
 **Objective:** TDD red: write the spec for the frontmatter parser, watch it fail.
 
 **Files:**
 - Create: `/Users/hugo/Proyectos/stratum/packages/dashboard/tests/parser.test.ts`
-- Create: `/Users/hugo/Proyectos/stratum/packages/dashboard/tests/fixtures/spec-sample.md`
+- Create: `/Users/hugo/Proyectos/stratum/packages/dashboard/tests/fixtures/specs/0001-sample.md`
+- Create: `/Users/hugo/Proyectos/stratum/packages/dashboard/tests/invalid-fixtures/spec-missing-id.md`
 
-**Step 1:** Create a fixture spec file at `tests/fixtures/spec-sample.md`:
+**Step 1:** Create a fixture spec file at `tests/fixtures/specs/0001-sample.md`:
 
 ```markdown
 ---
@@ -658,17 +761,20 @@ tags: [vocabulary, music]
 This is body text the parser must NOT touch.
 ```
 
-**Step 2:** Create the test file `tests/parser.test.ts`:
+Also create `tests/invalid-fixtures/spec-missing-id.md` with the same frontmatter but without the `id` field.
+
+**Step 2:** Create the test file `tests/parser.test.ts` using ESM-safe paths:
 
 ```typescript
 import { describe, it, expect } from 'vitest';
 import { parseFrontmatter } from '../src/parser.js';
-import { resolve } from 'node:path';
+
+const validSpecPath = new URL('./fixtures/specs/0001-sample.md', import.meta.url);
+const missingIdPath = new URL('./invalid-fixtures/spec-missing-id.md', import.meta.url);
 
 describe('parseFrontmatter', () => {
   it('returns typed record with all required fields for a spec', async () => {
-    const path = resolve(__dirname, 'fixtures/spec-sample.md');
-    const result = await parseFrontmatter(path);
+    const result = await parseFrontmatter(validSpecPath);
 
     expect(result.frontmatter.id).toBe('spec-0001');
     expect(result.frontmatter.type).toBe('spec');
@@ -679,7 +785,7 @@ describe('parseFrontmatter', () => {
   });
 
   it('throws on missing required field id', async () => {
-    await expect(parseFrontmatter('does-not-exist.md')).rejects.toThrow();
+    await expect(parseFrontmatter(missingIdPath)).rejects.toThrow(/id/);
   });
 });
 ```
@@ -696,7 +802,7 @@ Expected: FAIL with "Cannot find module '../src/parser.js'" or similar.
 
 ---
 
-### Task 0.6: Dashboard — `parser.ts` minimal implementation (green)
+### Task 0.7: Dashboard — `parser.ts` minimal implementation (green)
 
 **Objective:** Implement `parseFrontmatter` so the test passes.
 
@@ -708,27 +814,56 @@ Expected: FAIL with "Cannot find module '../src/parser.js'" or similar.
 **Step 1:** Create `src/types.ts`:
 
 ```typescript
-export type DocType = 'spec' | 'adr' | 'milestone' | 'task';
+import { z } from 'zod';
 
-export type SpecStatus = 'draft' | 'approved' | 'in_progress' | 'stable' | 'deprecated';
-export type AdrStatus = 'proposed' | 'accepted' | 'superseded' | 'rejected';
-export type MilestoneStatus = 'planned' | 'active' | 'shipped' | 'cancelled';
-export type TaskStatus = 'todo' | 'doing' | 'done' | 'blocked' | 'cancelled';
+const dateString = z.preprocess(
+  value => value instanceof Date ? value.toISOString().slice(0, 10) : value,
+  z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+);
+const progress = z.number().int().min(0).max(100).optional();
+const common = {
+  title: z.string().min(1),
+  version: z.string().regex(/^\d+\.\d+\.\d+$/),
+  owner: z.string().min(1),
+  created: dateString,
+  updated: dateString,
+  related: z.array(z.string()).default([]),
+  tags: z.array(z.string()).default([]),
+};
 
-export interface Frontmatter {
-  id: string;
-  type: DocType;
-  title: string;
-  status: SpecStatus | AdrStatus | MilestoneStatus | TaskStatus;
-  version: string;
-  owner: string;
-  created: string;
-  updated: string;
-  milestone?: string;
-  related?: string[];
-  impl_progress?: number;
-  tags?: string[];
-}
+export const frontmatterSchema = z.discriminatedUnion('type', [
+  z.object({
+    ...common,
+    id: z.string().regex(/^spec-\d{4}$/),
+    type: z.literal('spec'),
+    status: z.enum(['draft', 'approved', 'in_progress', 'stable', 'deprecated']),
+    milestone: z.string().regex(/^M\d+$/),
+    impl_progress: progress,
+  }).strict(),
+  z.object({
+    ...common,
+    id: z.string().regex(/^adr-\d{4}$/),
+    type: z.literal('adr'),
+    status: z.enum(['proposed', 'accepted', 'superseded', 'rejected']),
+  }).strict(),
+  z.object({
+    ...common,
+    id: z.string().regex(/^M\d+$/),
+    type: z.literal('milestone'),
+    status: z.enum(['planned', 'active', 'shipped', 'cancelled']),
+  }).strict(),
+  z.object({
+    ...common,
+    id: z.string().regex(/^task-\d{4}-\d{2}-\d{2}-.+$/),
+    type: z.literal('task'),
+    status: z.enum(['todo', 'doing', 'done', 'blocked', 'cancelled']),
+    milestone: z.string().regex(/^M\d+$/),
+    impl_progress: progress,
+  }).strict(),
+]);
+
+export type Frontmatter = z.infer<typeof frontmatterSchema>;
+export type DocType = Frontmatter['type'];
 
 export interface ParsedDoc {
   filepath: string;
@@ -741,27 +876,26 @@ export interface ParsedDoc {
 
 ```typescript
 import { readFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
 import matter from 'gray-matter';
-import type { ParsedDoc, Frontmatter } from './types.js';
+import { frontmatterSchema, type ParsedDoc } from './types.js';
 
-const REQUIRED_FIELDS = [
-  'id', 'type', 'title', 'status', 'version', 'owner', 'created', 'updated',
-] as const;
-
-export async function parseFrontmatter(filepath: string): Promise<ParsedDoc> {
+export async function parseFrontmatter(input: string | URL): Promise<ParsedDoc> {
+  const filepath = input instanceof URL ? fileURLToPath(input) : input;
   const raw = await readFile(filepath, 'utf-8');
-  const parsed = matter(raw);
 
-  for (const field of REQUIRED_FIELDS) {
-    if (parsed.data[field] === undefined || parsed.data[field] === null) {
-      throw new Error(`Missing required frontmatter field '${field}' in ${filepath}`);
-    }
+  // Reject gray-matter language engines. Tracking documents are YAML only.
+  if (!raw.startsWith('---\n') && !raw.startsWith('---\r\n')) {
+    throw new Error(`Expected standard YAML frontmatter in ${filepath}`);
   }
-
-  const fm = parsed.data as Frontmatter;
+  const parsed = matter(raw);
+  const result = frontmatterSchema.safeParse(parsed.data);
+  if (!result.success) {
+    throw new Error(`Invalid frontmatter in ${filepath}: ${result.error.message}`);
+  }
   return {
     filepath,
-    frontmatter: fm,
+    frontmatter: result.data,
     body: parsed.content,
   };
 }
@@ -790,21 +924,22 @@ git add packages/dashboard && git commit -m "feat(dashboard): parseFrontmatter w
 
 ---
 
-### Task 0.7: Dashboard — `parseAll` discovers every spec/ADR/milestone/task
+### Task 0.8: Dashboard — `parseAll` discovers every spec/ADR/milestone/task
 
 **Objective:** Walk the four top-level dirs and parse all `.md` files; add a test for the "happy path" with multiple fixtures.
 
 **Files:**
-- Create: `/Users/hugo/Proyectos/stratum/packages/dashboard/tests/fixtures/adr-sample.md`
-- Create: `/Users/hugo/Proyectos/stratum/packages/dashboard/tests/fixtures/milestone-sample.md`
-- Create: `/Users/hugo/Proyectos/stratum/packages/dashboard/tests/fixtures/task-sample.md`
+- Create: `/Users/hugo/Proyectos/stratum/packages/dashboard/tests/fixtures/adr/0001-sample.md`
+- Create: `/Users/hugo/Proyectos/stratum/packages/dashboard/tests/fixtures/milestones/M1-sample.md`
+- Create: `/Users/hugo/Proyectos/stratum/packages/dashboard/tests/fixtures/tasks/2026-07-18-spec-0001.md`
+- Create: `/Users/hugo/Proyectos/stratum/packages/dashboard/tests/fixtures/specs/_template.md`
 - Modify: `/Users/hugo/Proyectos/stratum/packages/dashboard/tests/parser.test.ts`
 - Modify: `/Users/hugo/Proyectos/stratum/packages/dashboard/src/parser.ts`
 - Modify: `/Users/hugo/Proyectos/stratum/packages/dashboard/src/index.ts`
 
 **Step 1:** Add fixtures:
 
-`tests/fixtures/adr-sample.md`:
+`tests/fixtures/adr/0001-sample.md`:
 ```markdown
 ---
 id: adr-0001
@@ -824,7 +959,7 @@ tags: [architecture]
 We adopt hexagonal architecture for the live-bridge package.
 ```
 
-`tests/fixtures/milestone-sample.md`:
+`tests/fixtures/milestones/M1-sample.md`:
 ```markdown
 ---
 id: M1
@@ -842,7 +977,7 @@ tags: [m1]
 # M1: Vocabulary
 ```
 
-`tests/fixtures/task-sample.md`:
+`tests/fixtures/tasks/2026-07-18-spec-0001.md`:
 ```markdown
 ---
 id: task-2026-07-18-spec-0001
@@ -868,19 +1003,17 @@ import { parseAll } from '../src/parser.js';
 
 describe('parseAll', () => {
   it('discovers and parses all .md files under a root', async () => {
-    const root = resolve(__dirname, 'fixtures');
+    const root = new URL('./fixtures/', import.meta.url);
     const docs = await parseAll(root);
     expect(docs.length).toBe(4);
     const types = docs.map(d => d.frontmatter.type).sort();
     expect(types).toEqual(['adr', 'milestone', 'spec', 'task']);
   });
 
-  it('skips files without frontmatter', async () => {
-    // _template.md will be added in a later task; for now we just verify
-    // that unrelated files are skipped via the ignore predicate.
-    const root = resolve(__dirname, 'fixtures');
-    const docs = await parseAll(root, { onlyDirs: ['specs', 'adr', 'milestones', 'tasks'] });
-    expect(docs.every(d => ['spec', 'adr', 'milestone', 'task'].includes(d.frontmatter.type))).toBe(true);
+  it('ignores explicitly named templates', async () => {
+    const root = new URL('./fixtures/', import.meta.url);
+    const docs = await parseAll(root);
+    expect(docs.some(doc => doc.filepath.endsWith('_template.md'))).toBe(false);
   });
 });
 ```
@@ -893,37 +1026,62 @@ cd /Users/hugo/Proyectos/stratum/packages/dashboard && pnpm test
 
 Expected: FAIL — `parseAll` is not exported.
 
-**Step 4:** Implement `parseAll` in `src/parser.ts` (add at bottom):
+**Step 4:** Implement `parseAll` in `src/parser.ts` (add at bottom). Extend the existing path import to include `basename` and `join`:
 
 ```typescript
 import { readdir } from 'node:fs/promises';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 
-export interface ParseAllOptions {
-  onlyDirs?: readonly string[];
+const TRACKED_DIRS = ['specs', 'adr', 'milestones', 'tasks'] as const;
+
+function filenameMatchesDocument(doc: ParsedDoc): boolean {
+  const stem = basename(doc.filepath, '.md');
+  const { id, type } = doc.frontmatter;
+  if (type === 'spec') return stem.startsWith(`${id.slice('spec-'.length)}-`);
+  if (type === 'adr') return stem.startsWith(`${id.slice('adr-'.length)}-`);
+  if (type === 'milestone') return stem.startsWith(`${id}-`);
+  return stem === id.slice('task-'.length);
 }
 
-export async function parseAll(rootDir: string, options: ParseAllOptions = {}): Promise<ParsedDoc[]> {
-  const entries = await readdir(rootDir, { withFileTypes: true });
-  const dirs = entries
-    .filter(e => e.isDirectory())
-    .map(e => e.name)
-    .filter(name => !options.onlyDirs || options.onlyDirs.includes(name));
-
+export async function parseAll(input: string | URL): Promise<ParsedDoc[]> {
+  const rootDir = input instanceof URL ? fileURLToPath(input) : input;
   const docs: ParsedDoc[] = [];
-  for (const dir of dirs) {
+  const errors: Error[] = [];
+
+  for (const dir of TRACKED_DIRS) {
     const files = await readdir(join(rootDir, dir), { withFileTypes: true });
     for (const f of files) {
-      if (!f.isFile() || !f.name.endsWith('.md')) continue;
+      if (!f.isFile() || !f.name.endsWith('.md') || f.name.startsWith('_')) continue;
       const fullPath = join(rootDir, dir, f.name);
       try {
-        const doc = await parseFrontmatter(fullPath);
-        docs.push(doc);
-      } catch (err) {
-        // Skip non-document files (e.g. _template.md without frontmatter)
+        docs.push(await parseFrontmatter(fullPath));
+      } catch (error) {
+        errors.push(error instanceof Error ? error : new Error(String(error)));
       }
     }
   }
+
+  const byId = new Map<string, ParsedDoc>();
+  for (const doc of docs) {
+    const { id } = doc.frontmatter;
+    if (byId.has(id)) errors.push(new Error(`Duplicate document id '${id}'`));
+    else byId.set(id, doc);
+    if (!filenameMatchesDocument(doc)) {
+      errors.push(new Error(`Filename does not match id '${id}': ${doc.filepath}`));
+    }
+  }
+
+  for (const doc of docs) {
+    const fm = doc.frontmatter;
+    if ((fm.type === 'spec' || fm.type === 'task') && byId.get(fm.milestone)?.frontmatter.type !== 'milestone') {
+      errors.push(new Error(`Unknown milestone '${fm.milestone}' in ${doc.filepath}`));
+    }
+    for (const relatedId of fm.related) {
+      if (!byId.has(relatedId)) errors.push(new Error(`Unknown related id '${relatedId}' in ${doc.filepath}`));
+    }
+  }
+
+  if (errors.length > 0) throw new AggregateError(errors, 'Workspace document validation failed');
   return docs;
 }
 ```
@@ -932,7 +1090,6 @@ export async function parseAll(rootDir: string, options: ParseAllOptions = {}): 
 
 ```typescript
 export { parseFrontmatter, parseAll } from './parser.js';
-export type { ParseAllOptions } from './parser.js';
 export type { ParsedDoc, Frontmatter, DocType } from './types.js';
 ```
 
@@ -952,7 +1109,7 @@ git add packages/dashboard && git commit -m "feat(dashboard): parseAll discovers
 
 ---
 
-### Task 0.8: Dashboard — `aggregator.ts` groups docs by milestone/status
+### Task 0.9: Dashboard — `aggregator.ts` groups docs by milestone/status
 
 **Objective:** Take parsed docs and produce structured aggregates for the renderer.
 
@@ -966,25 +1123,25 @@ git add packages/dashboard && git commit -m "feat(dashboard): parseAll discovers
 ```typescript
 import { describe, it, expect } from 'vitest';
 import { aggregate } from '../src/aggregator.js';
-import type { ParsedDoc } from '../src/types.js';
+import type { ParsedDoc, Frontmatter } from '../src/types.js';
 
 const fixtures: ParsedDoc[] = [
   {
-    filepath: 'specs/0001.md',
+    filepath: 'specs/0001-vocab.md',
     frontmatter: {
       id: 'spec-0001', type: 'spec', title: 'Vocab', status: 'draft',
       version: '0.1.0', owner: 'hugo', created: '2026-07-18', updated: '2026-07-18',
       milestone: 'M1', related: [], impl_progress: 0, tags: [],
-    },
+    } satisfies Frontmatter,
     body: '',
   },
   {
-    filepath: 'milestones/M1.md',
+    filepath: 'milestones/M1-vocab.md',
     frontmatter: {
       id: 'M1', type: 'milestone', title: 'Vocab', status: 'planned',
       version: '0.1.0', owner: 'hugo', created: '2026-07-18', updated: '2026-07-18',
       related: [], tags: [],
-    },
+    } satisfies Frontmatter,
     body: '',
   },
 ];
@@ -1001,6 +1158,10 @@ describe('aggregate', () => {
     const result = aggregate(fixtures);
     expect(result.adrs.length).toBe(0);
     expect(result.milestones['M1'].specs.length).toBe(1);
+  });
+
+  it('is invariant to input order', () => {
+    expect(aggregate([...fixtures].reverse())).toEqual(aggregate(fixtures));
   });
 });
 ```
@@ -1035,39 +1196,44 @@ export function aggregate(docs: ParsedDoc[]): Aggregated {
   const adrs: ParsedDoc[] = [];
   const orphans: ParsedDoc[] = [];
 
+  // First pass indexes containers so association never depends on readdir order.
   for (const doc of docs) {
     const fm = doc.frontmatter;
     if (fm.type === 'milestone') {
-      const id = fm.id;
-      if (!milestones[id]) {
-        milestones[id] = { milestone: doc, specs: [], tasks: [] };
-      } else {
-        milestones[id].milestone = doc;
-      }
+      if (milestones[fm.id]) throw new Error(`Duplicate milestone '${fm.id}'`);
+      milestones[fm.id] = { milestone: doc, specs: [], tasks: [] };
     } else if (fm.type === 'adr') {
       adrs.push(doc);
-    } else if (fm.type === 'spec') {
-      const mid = fm.milestone;
-      if (mid && milestones[mid]) {
-        milestones[mid].specs.push(doc);
-      } else {
-        orphans.push(doc);
-      }
-    } else if (fm.type === 'task') {
-      const mid = fm.milestone;
-      if (mid && milestones[mid]) {
-        milestones[mid].tasks.push(doc);
-      } else {
-        orphans.push(doc);
-      }
     }
   }
+
+  // Second pass associates children after all milestones are known.
+  for (const doc of docs) {
+    const fm = doc.frontmatter;
+    if (fm.type !== 'spec' && fm.type !== 'task') continue;
+    const group = milestones[fm.milestone];
+    if (!group) {
+      orphans.push(doc);
+    } else if (fm.type === 'spec') {
+      group.specs.push(doc);
+    } else {
+      group.tasks.push(doc);
+    }
+  }
+
+  for (const group of Object.values(milestones)) {
+    group.specs.sort((a, b) => a.frontmatter.id.localeCompare(b.frontmatter.id));
+    group.tasks.sort((a, b) => a.frontmatter.id.localeCompare(b.frontmatter.id));
+  }
+  adrs.sort((a, b) => a.frontmatter.id.localeCompare(b.frontmatter.id));
+  orphans.sort((a, b) => a.frontmatter.id.localeCompare(b.frontmatter.id));
 
   return { milestones, adrs, orphans };
 }
 
 export function calculateMilestoneProgress(group: MilestoneGroup): number {
-  const items = [...group.specs, ...group.tasks];
+  // Specs are the unit of milestone delivery; task status is displayed separately.
+  const items = group.specs;
   if (items.length === 0) return 0;
   const sum = items.reduce((acc, doc) => acc + (doc.frontmatter.impl_progress ?? 0), 0);
   return Math.round(sum / items.length);
@@ -1079,7 +1245,6 @@ export function calculateMilestoneProgress(group: MilestoneGroup): number {
 ```typescript
 export { parseFrontmatter, parseAll } from './parser.js';
 export { aggregate, calculateMilestoneProgress } from './aggregator.js';
-export type { ParseAllOptions } from './parser.js';
 export type { Aggregated, MilestoneGroup } from './aggregator.js';
 export type { ParsedDoc, Frontmatter, DocType } from './types.js';
 ```
@@ -1100,7 +1265,7 @@ git add packages/dashboard && git commit -m "feat(dashboard): aggregator groups 
 
 ---
 
-### Task 0.9: Dashboard — `renderer.ts` outputs the ASCII dashboard
+### Task 0.10: Dashboard — `renderer.ts` outputs the ASCII dashboard
 
 **Objective:** Render the dashboard to stdout using chalk.
 
@@ -1115,25 +1280,25 @@ git add packages/dashboard && git commit -m "feat(dashboard): aggregator groups 
 import { describe, it, expect } from 'vitest';
 import { renderDashboard } from '../src/renderer.js';
 import { aggregate } from '../src/aggregator.js';
-import type { ParsedDoc } from '../src/types.js';
+import type { ParsedDoc, Frontmatter } from '../src/types.js';
 
 const docs: ParsedDoc[] = [
   {
-    filepath: 'specs/0001.md',
+    filepath: 'specs/0001-vocab.md',
     frontmatter: {
       id: 'spec-0001', type: 'spec', title: 'Vocab', status: 'draft',
       version: '0.1.0', owner: 'hugo', created: '2026-07-18', updated: '2026-07-18',
       milestone: 'M1', related: [], impl_progress: 0, tags: [],
-    },
+    } satisfies Frontmatter,
     body: '',
   },
   {
-    filepath: 'milestones/M1.md',
+    filepath: 'milestones/M1-vocab.md',
     frontmatter: {
       id: 'M1', type: 'milestone', title: 'Vocab', status: 'planned',
       version: '0.1.0', owner: 'hugo', created: '2026-07-18', updated: '2026-07-18',
       related: [], tags: [],
-    },
+    } satisfies Frontmatter,
     body: '',
   },
 ];
@@ -1167,7 +1332,8 @@ import { calculateMilestoneProgress } from './aggregator.js';
 const BAR_WIDTH = 10;
 
 function progressBar(pct: number): string {
-  const filled = Math.round((pct / 100) * BAR_WIDTH);
+  const safePct = Math.min(100, Math.max(0, pct));
+  const filled = Math.round((safePct / 100) * BAR_WIDTH);
   const empty = BAR_WIDTH - filled;
   return chalk.green('▓'.repeat(filled)) + chalk.gray('░'.repeat(empty));
 }
@@ -1250,7 +1416,6 @@ export function renderDashboard(agg: Aggregated): string {
 export { parseFrontmatter, parseAll } from './parser.js';
 export { aggregate, calculateMilestoneProgress } from './aggregator.js';
 export { renderDashboard } from './renderer.js';
-export type { ParseAllOptions } from './parser.js';
 export type { Aggregated, MilestoneGroup } from './aggregator.js';
 export type { ParsedDoc, Frontmatter, DocType } from './types.js';
 ```
@@ -1266,12 +1431,12 @@ Expected: PASS — 7 tests green.
 **Step 6:** Commit:
 
 ```bash
-git add packages/dashboard && git commit -m "feat(dashboard): ASCII renderer with chalk"
+git add packages/dashboard && git commit -m "feat(dashboard): terminal renderer with chalk"
 ```
 
 ---
 
-### Task 0.10: Dashboard — `cli.ts` walks the workspace root
+### Task 0.11: Dashboard — `cli.ts` walks the workspace root
 
 **Objective:** Provide a binary entry point that walks from the workspace root, not a test fixtures dir.
 
@@ -1283,35 +1448,46 @@ git add packages/dashboard && git commit -m "feat(dashboard): ASCII renderer wit
 
 ```typescript
 #!/usr/bin/env node
-import { resolve, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { access } from 'node:fs/promises';
+import { dirname, join, resolve } from 'node:path';
 import { parseAll } from './parser.js';
 import { aggregate } from './aggregator.js';
 import { renderDashboard } from './renderer.js';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
+const REQUIRED_PATHS = ['pnpm-workspace.yaml', 'specs', 'adr', 'milestones', 'tasks'] as const;
+
+async function isWorkspaceRoot(directory: string): Promise<boolean> {
+  try {
+    await Promise.all(REQUIRED_PATHS.map(path => access(join(directory, path))));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function findWorkspaceRoot(start: string): Promise<string> {
+  let cursor = resolve(start);
+  while (true) {
+    if (await isWorkspaceRoot(cursor)) return cursor;
+    const parent = dirname(cursor);
+    if (parent === cursor) throw new Error('Could not locate the Stratum workspace root');
+    cursor = parent;
+  }
+}
 
 async function main(): Promise<void> {
-  // Walk up to find the workspace root (where specs/, adr/, milestones/, tasks/ live).
-  let cursor = resolve(__dirname, '..');
-  for (let i = 0; i < 6; i++) {
-    try {
-      const docs = await parseAll(cursor);
-      const agg = aggregate(docs);
-      const out = renderDashboard(agg);
-      console.log(out);
-      return;
-    } catch {
-      cursor = resolve(cursor, '..');
-    }
-  }
-  console.error('stratum-status: could not locate specs/adr/milestones/tasks directories');
-  process.exit(1);
+  const root = await findWorkspaceRoot(process.cwd());
+  const docs = await parseAll(root);
+  process.stdout.write(`${renderDashboard(aggregate(docs))}\n`);
 }
 
 main().catch(err => {
-  console.error(err);
-  process.exit(1);
+  if (err instanceof AggregateError) {
+    for (const cause of err.errors) process.stderr.write(`${String(cause)}\n`);
+  } else {
+    process.stderr.write(`${err instanceof Error ? err.message : String(err)}\n`);
+  }
+  process.exitCode = 1;
 });
 ```
 
@@ -1321,7 +1497,7 @@ main().catch(err => {
 cd /Users/hugo/Proyectos/stratum/packages/dashboard && pnpm build
 ```
 
-Expected: `dist/cli.js` exists, exits 0.
+Expected: `dist/cli.js` and `dist/index.js` exist, `dist/src/` and `dist/tests/` do not exist, and `node dist/cli.js` exits 0 when run from the workspace root. Integration tests (from a nested directory, from outside the workspace, with an invalid document) are split into Task 0.11b to keep this task bite-sized.
 
 **Step 3:** Commit:
 
@@ -1331,7 +1507,134 @@ git add packages/dashboard && git commit -m "feat(dashboard): cli entry walks wo
 
 ---
 
-### Task 0.11: Spec template + first real spec/ADR/milestone/task files
+### Task 0.11b: Dashboard — CLI integration tests via `node:child_process`
+
+**Objective:** Verify the `cli.ts` binary behaves correctly when invoked as a real subprocess from various working directories and with various workspace contents.
+
+**Files:**
+- Create: `/Users/hugo/Proyectos/stratum/packages/dashboard/tests/cli.test.ts`
+- Create: `/Users/hugo/Proyectos/stratum/packages/dashboard/tests/fixtures/workspace/{specs,adr,milestones,tasks}/.gitkeep`
+- Create: `/Users/hugo/Proyectos/stratum/packages/dashboard/tests/fixtures/workspace/specs/0001-fixture.md`
+- Create: `/Users/hugo/Proyectos/stratum/packages/dashboard/tests/fixtures/workspace/specs/0001-broken.md`
+
+**Step 1:** Write the failing test `tests/cli.test.ts`:
+
+```typescript
+import { describe, it, expect } from 'vitest';
+import { spawnSync } from 'node:child_process';
+import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const CLI_PATH = resolve(dirname(fileURLToPath(import.meta.url)), '../dist/cli.js');
+const FIXTURE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), 'fixtures/workspace');
+const NESTED = join(FIXTURE_ROOT, 'deeply/nested/cwd');
+
+function setupWorkspace(): void {
+  for (const d of ['specs', 'adr', 'milestones', 'tasks']) {
+    mkdirSync(join(FIXTURE_ROOT, d), { recursive: true });
+  }
+  writeFileSync(
+    join(FIXTURE_ROOT, 'pnpm-workspace.yaml'),
+    "packages:\n  - 'apps/*'\n  - 'packages/*'\n",
+  );
+  writeFileSync(join(FIXTURE_ROOT, 'specs/0001-fixture.md'), `---
+id: spec-0001
+type: spec
+title: "Fixture"
+status: draft
+version: 0.1.0
+owner: hugo
+created: 2026-07-18
+updated: 2026-07-18
+milestone: M1
+related: []
+tags: []
+---
+
+# Fixture spec body
+`);
+  mkdirSync(NESTED, { recursive: true });
+}
+
+describe('cli (integration)', () => {
+  it('renders dashboard when invoked from the workspace root', () => {
+    setupWorkspace();
+    const result = spawnSync('node', [CLI_PATH], { cwd: FIXTURE_ROOT, encoding: 'utf-8' });
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('STRATUM');
+    expect(result.stdout).toContain('spec-0001');
+  });
+
+  it('finds the workspace root when invoked from a nested cwd', () => {
+    const result = spawnSync('node', [CLI_PATH], { cwd: NESTED, encoding: 'utf-8' });
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('STRATUM');
+  });
+
+  it('exits non-zero with a diagnostic when invoked outside any workspace', () => {
+    const result = spawnSync('node', [CLI_PATH], { cwd: '/tmp', encoding: 'utf-8' });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('Could not locate the Stratum workspace root');
+  });
+
+  it('reports every invalid document via AggregateError and exits non-zero', () => {
+    // Write a spec with an invalid status to trigger zod failure
+    writeFileSync(join(FIXTURE_ROOT, 'specs/0001-broken.md'), `---
+id: spec-9999
+type: spec
+title: "Broken"
+status: not_a_real_status
+version: 0.1.0
+owner: hugo
+created: 2026-07-18
+updated: 2026-07-18
+milestone: M1
+related: []
+tags: []
+---
+
+# Broken body
+`);
+    const result = spawnSync('node', [CLI_PATH], { cwd: FIXTURE_ROOT, encoding: 'utf-8' });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('0001-broken.md');
+    rmSync(join(FIXTURE_ROOT, 'specs/0001-broken.md'));
+  });
+});
+```
+
+**Step 2:** Run, watch FAIL:
+
+```bash
+cd /Users/hugo/Proyectos/stratum/packages/dashboard && pnpm test
+```
+
+Expected: FAIL — `tests/cli.test.ts` cannot find the binary at `dist/cli.js` or fixtures are missing.
+
+**Step 3:** Build the package so `dist/cli.js` exists:
+
+```bash
+pnpm build
+```
+
+**Step 4:** Run tests, verify PASS:
+
+```bash
+pnpm test
+```
+
+Expected: PASS — all four integration tests green, total dashboard suite ≥ 11 tests green.
+
+**Step 5:** Commit:
+
+```bash
+git add packages/dashboard && git commit -m "test(dashboard): cli integration tests for workspace discovery and error reporting"
+```
+
+---
+
+### Task 0.12: Spec template + first real spec/ADR/milestone/task files
 
 **Objective:** Author the canonical template and the FIRST set of real docs so the dashboard has something to render.
 
@@ -1516,7 +1819,7 @@ Define a YAML-based vocabulary of musical signatures that Stratum consumes. A si
 ### Scale
 A scale is defined by:
 - `name`: kebab-case identifier (`phrygian`)
-- `root_default`: pitch class 0-11 (`0` for E phrygian, etc.)
+- `root_pitch_class`: integer 0-11 using MIDI convention (`C=0`, `C#=1`, ..., `B=11`). A scale does not fix its root; combining `phrygian` with `root_pitch_class=4` produces E phrygian.
 - `intervals`: semitone offsets from root, ascending
 - `character`: short evocative tag (`dark`, `tense`, `exotic`)
 
@@ -1635,18 +1938,20 @@ tags: []
 ## Today
 - [x] T0.1 root package.json
 - [x] T0.2 tsconfig.base
-- [x] T0.3 README + AGENTS.md
-- [x] T0.4 dashboard package skeleton
-- [x] T0.5 parser test (red)
-- [x] T0.6 parser implementation (green)
-- [x] T0.7 parseAll discovery
-- [x] T0.8 aggregator
-- [x] T0.9 renderer
-- [x] T0.10 cli entry
-- [ ] T0.11 first real spec/ADR/milestone/task files
-- [ ] T0.12 dashboard renders the real workspace
-- [ ] T0.13 author scaffold scripts (new-spec, new-adr, ...)
-- [ ] T0.14 final commit + status check
+- [x] T0.3 CI workflow
+- [x] T0.4 README + AGENTS.md
+- [x] T0.5 dashboard package skeleton
+- [x] T0.6 parser test (red)
+- [x] T0.7 parser implementation (green)
+- [x] T0.8 parseAll discovery
+- [x] T0.9 aggregator
+- [x] T0.10 renderer
+- [x] T0.11 cli entry
+- [ ] T0.11b cli integration tests via child_process
+- [ ] T0.12 first real spec/ADR/milestone/task files
+- [ ] T0.13 dashboard renders the real workspace
+- [ ] T0.14 author scaffold scripts (new-spec, new-adr, ...)
+- [ ] T0.15 final commit + status check
 
 ## Done
 - (filling in as we go)
@@ -1663,7 +1968,7 @@ cd /Users/hugo/Proyectos/stratum && git add specs adr milestones tasks && git co
 
 ---
 
-### Task 0.12: Run the dashboard — verify it reads real workspace
+### Task 0.13: Run the dashboard — verify it reads real workspace
 
 **Objective:** Build the dashboard package and confirm the rendered output includes M1, M2, M3, all three ADRs, spec-0001, and the task.
 
@@ -1704,11 +2009,11 @@ M3 — Live-bridge                   [░░░░░░░░░░]    0%   pl
 ═══════════════════════════════════════════════════════════════
 ```
 
-**Step 3:** If the output is correct, no commit needed (this is verification of T0.11's commit). If you had to fix anything, commit a fix.
+**Step 3:** If the output is correct, no commit needed (this is verification of T0.12's commit). If you had to fix anything, commit a fix.
 
 ---
 
-### Task 0.13: Author scaffold scripts (`new-spec.sh`, `new-adr.sh`, `new-milestone.sh`, `new-task.sh`)
+### Task 0.14: Author scaffold scripts (`new-spec.sh`, `new-adr.sh`, `new-milestone.sh`, `new-task.sh`)
 
 **Objective:** Provide shell scripts that auto-number the next doc and copy the template with substituted fields.
 
@@ -1770,7 +2075,7 @@ git add scripts && git commit -m "chore: scaffold scripts for spec/adr/milestone
 
 ---
 
-### Task 0.14: Final Day 0 commit + dashboard sanity check
+### Task 0.15: Final Day 0 commit + dashboard sanity check
 
 **Objective:** Confirm `pnpm status` works end-to-end; commit any stragglers; tag Day 0.
 
@@ -1789,7 +2094,7 @@ cd /Users/hugo/Proyectos/stratum && pnpm install
 cd /Users/hugo/Proyectos/stratum && pnpm status
 ```
 
-Expected: Same output as T0.12 step 2.
+Expected: Same output as T0.13 step 2.
 
 **Step 3:** Run all tests across the monorepo:
 
@@ -1799,7 +2104,7 @@ cd /Users/hugo/Proyectos/stratum && pnpm test
 
 Expected: 7 tests green in dashboard package.
 
-**Step 4:** Update the task file to mark T0.12–T0.14 as done and set `status: done`:
+**Step 4:** Update the task file to mark T0.13–T0.15 as done and set `status: done`:
 
 ```yaml
 status: done
@@ -1845,7 +2150,14 @@ After Day 0, M1 builds the actual vocabulary layer. Skeleton only here; full det
 | spec-0011 | Audio stem renderer (drone, pad, fx) |
 | spec-0012 | End-to-end: `stratum generate "<intent>"` → `.stratum/` bundle |
 
-**M2 ship criterion**: Without touching Live, `stratum generate "techno raw 139 phrygian arrakis"` produces a `.stratum/` directory with `drums.mid`, `bass.mid`, `lead.mid`, `drone.wav`, `pad.wav`.
+**Mandatory pre-M2 spikes** (must complete and merge before spec-0010):
+
+| Spike ID | Title | Required ADR | Deliverable |
+|---|---|---|---|
+| spec-0010-a | MIDI library selection: `midi-writer-js` vs `easymidi` | adr-0010-midi-library.md | Locked library choice + reason the rejected option loses, captured before any generator code |
+| spec-0011-a | Audio stem renderer feasibility: render (FFmpeg / SoX / node) vs model (HeartMuLa / Suno) | adr-0011-audio-renderer.md | Locked renderer choice OR explicit decision to ship a deterministic placeholder first and gate real audio on a second spike |
+
+**M2 ship criterion**: Without touching Live, `stratum generate "techno raw 139 phrygian arrakis"` produces a `.stratum/` directory containing a `bundle.json` manifest plus `drums.mid`, `bass.mid`, `lead.mid`, `drone.wav`, `pad.wav`. The bundle must declare: bundle schema version, `intent` (scale/genre/mood + BPM), `seed`, MIDI PPQ, length in bars, key signature, tempo, sample rate, bit depth, per-track role, and SHA-256 of every binary artifact. Generation must be deterministic given the same seed.
 
 ---
 
@@ -1862,7 +2174,14 @@ After Day 0, M1 builds the actual vocabulary layer. Skeleton only here; full det
 | spec-0019 | MCP adapter |
 | spec-0020 | End-to-end: `stratum generate ... && stratum push` against Live 12 |
 
-**M3 ship criterion**: With Live 12 running on `localhost:11000` (OSC enabled), `stratum push --target drums` loads a generated clip into a specific rack/channel/device; `stratum snapshot` saves/restores set state.
+**Mandatory pre-M3 spikes** (must complete and merge before spec-0015 / spec-0016):
+
+| Spike ID | Title | Required ADR | Deliverable |
+|---|---|---|---|
+| spec-0015-a | Live OSC transport: built-in surface vs AbletonOSC vs Max for Live device; port, namespace, CI testability | adr-0015-transport.md | Locked transport + message namespace + how CI exercises it |
+| spec-0016-a | `.als` parser constraints: size, depth, DTDs, entities; chosen lib or hand-rolled; bounded resource policy | adr-0016-als-parser.md | Locked parser + explicit bounds (max bytes, max depth) |
+
+**M3 ship criterion**: With Live 12 running on `localhost:11000` (OSC enabled), `stratum push --target drums` loads a generated clip into a specific rack/channel/device; `stratum snapshot` saves/restores set state. Every command returns a `CommandResult` with ack/timeout/retry policy, and the facade enforces loopback-only endpoints unless `--allow-remote` is explicitly passed. The FileAdapter parses a sample `.als` with bounded size and depth limits, and snapshots are versioned snapshots stored under `.stratum/snapshots/<bundle-id>/<state-revision>/` to prevent silent overwrites.
 
 ---
 
@@ -1877,9 +2196,17 @@ After Day 0, M1 builds the actual vocabulary layer. Skeleton only here; full det
 | Gray-matter + strict TS friction | Type the parsed data manually in `types.ts`; do not rely on `unknown` |
 
 **Open questions to resolve before M3**:
-1. Does user want OSC (default Live behavior) or MCP (newer, bidirectional)?
-2. Where do generated `.stratum/` bundles live by default (`~/Music/stratum/`? `$PROJECT/.stratum/`?)
-3. Audio stems: real-time render (FFmpeg / SoX / Python) or model-based (HeartMuLa / Suno)?
+1. Does user want OSC (default Live behavior) or MCP (newer, bidirectional)? The answer must be captured in `spec-0015` and an ADR before any adapter code is written.
+2. Where do generated `.stratum/` bundles live by default (`~/Music/stratum/`? `$PROJECT/.stratum/`?)? Default must be committed to `bundle.json` and documented in `docs/getting-started.md`.
+3. Audio stems: real-time render (FFmpeg / SoX / Python) or model-based (HeartMuLa / Suno)? The selected renderer must be evaluated against licensing, determinism, latency, and binary distribution before spec-0011 is implemented; if the answer is unclear, ship a deterministic placeholder renderer first and gate real audio on a spike.
+
+**Mandatory pre-M2 spike** — `spec-0010-a` (write before spec-0010):
+- Pick `midi-writer-js` vs `easymidi`. Decide based on: license, ESM support, maintenance, ability to write PPQ/header bytes, and ability to disable running status when we need to.
+- Document the decision in `adr-0010-midi-library.md` including why the rejected option loses.
+
+**Mandatory pre-M3 spikes** — `spec-0015-a` and `spec-0016-a` (write before adapters):
+- `spec-0015-a`: identify the exact Live component that exposes OSC (Live built-in OSC surface vs AbletonOSC vs Max for Live device), the port, the message namespace we will use, and what is actually testable in CI. Capture in `adr-0015-transport.md`.
+- `spec-0016-a`: enumerate .als parser constraints (size, depth, DTDs, entities), chosen library or hand-rolled parser, and bounded resource policy. Capture in `adr-0016-als-parser.md`.
 
 ---
 
@@ -1889,7 +2216,7 @@ Plan complete and saved.
 
 **Path**: `/Users/hugo/Proyectos/stratum/.hermes/plans/2026-07-18_135825-stratum-day0-and-roadmap.md`
 
-**Summary**: 14 Day-0 tasks (Tasks 0.1–0.14) build the tracking system first, then 3 sprints (M1/M2/M3) deliver the musical core. Every task follows strict TDD (red → green → commit), has exact file paths and copy-pasteable code, and ends with a commit.
+**Summary**: 16 Day-0 tasks (Tasks 0.1–0.11 + 0.11b + 0.12–0.15) build the tracking system plus CI first, then 3 sprints (M1/M2/M3) deliver the musical core. Every task follows strict TDD (red → green → commit), has exact file paths and copy-pasteable code, and ends with a commit.
 
 **Ready to execute using subagent-driven-development** — each Day-0 task dispatches a fresh subagent (implementer → spec reviewer → code quality reviewer). For sprints M1+ I'll write per-sprint plans that decompose each spec into bite-sized tasks the same way.
 
