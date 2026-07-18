@@ -2,7 +2,7 @@
 id: spec-0002
 type: spec
 title: "Vocabulary Repository"
-status: draft
+status: approved
 version: 0.1.0
 owner: hugo
 created: 2026-07-18
@@ -60,28 +60,47 @@ Each subdirectory contains one YAML file per vocabulary item. Filenames are keba
 
 The repository exposes three readonly collections after a successful load:
 
-- scales(): ReadonlyMap<string, Scale> — keyed by scale name
-- genres(): ReadonlyMap<string, Genre> — keyed by genre name
-- moods(): ReadonlyMap<string, Mood> — keyed by mood name
+- `scales`: `ReadonlyMap<string, Scale>` — keyed by scale name
+- `genres`: `ReadonlyMap<string, Genre>` — keyed by genre name
+- `moods`: `ReadonlyMap<string, Mood>` — keyed by mood name
 
-Where Scale, Genre, and Mood are the domain types defined by spec-0001 (their exact TypeScript shape is part of spec-0003 SignatureFactory; the repository deals in the validated domain objects, not in YAML ASTs).
+`Scale`, `Genre`, and `Mood` are the domain types defined by spec-0001 (their exact TypeScript shape is part of spec-0003 SignatureFactory; the repository deals in the validated domain objects, not in YAML ASTs).
+
+The collections are exposed as TypeScript getters, not methods, to make the read-only intent explicit at every call site.
 
 ---
 
 ## Constructor
 
-new VocabularyRepository(rootDir: string, options?: { logger?: Logger })
+`new VocabularyRepository(rootDir: string, options?: { logger?: Logger })`
+
+The constructor is synchronous and throws on error. If construction fails, no `VocabularyRepository` instance is returned; the caller never holds a reference to a half-initialized repository.
 
 On construction:
 
-1. Resolve rootDir to an absolute path. Fail with a descriptive error if rootDir does not exist or is not a directory.
-2. Verify that scales/, genres/, and moods/ exist under rootDir. Fail with a descriptive error listing the missing paths if any is absent.
-3. Load and validate all files. Fail with an AggregateError if any file fails to load or validate.
+1. Resolve `rootDir` to an absolute path. Throw with a descriptive error if `rootDir` does not exist or is not a directory.
+2. Verify that `scales/`, `genres/`, and `moods/` exist under `rootDir`. Throw with a descriptive error listing the missing paths if any is absent.
+3. Load and validate all files. Throw with a `VocabularyLoadError` (see Error Model) if any file fails to load or validate.
 4. On success, expose the loaded collections.
+
+The repository never exposes a partial repository. There is no in-between state.
 
 ---
 
-## Validation
+### Logger
+
+`Logger` is the standard console-shaped interface:
+
+```
+interface Logger {
+  debug(...args: unknown[]): void
+  info(...args: unknown[]): void
+  warn(...args: unknown[]): void
+  error(...args: unknown[]): void
+}
+```
+
+The default, when no logger is provided, is `console`. The repository never throws based on logger availability and never depends on the logger being present.
 
 Each loaded YAML file is validated against the schema defined by spec-0001. Validation failures MUST include:
 
