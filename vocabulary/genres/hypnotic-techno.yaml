@@ -1,0 +1,15 @@
+name: hypnotic-techno
+
+tempo:
+  min: 136
+  max: 142
+  default: 139
+
+defaults:
+  energy: 0.75
+  complexity: 0.30
+  groove: 0.90
+
+rhythm_signature: four-on-the-floor
+
+harmonic_density: low

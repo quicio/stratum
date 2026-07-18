@@ -1,0 +1,15 @@
+name: deep-house
+
+tempo:
+  min: 120
+  max: 126
+  default: 124
+
+defaults:
+  energy: 0.55
+  complexity: 0.45
+  groove: 0.70
+
+rhythm_signature: four-on-the-floor
+
+harmonic_density: medium

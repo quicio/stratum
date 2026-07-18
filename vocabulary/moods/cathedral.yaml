@@ -1,0 +1,21 @@
+name: cathedral
+
+effects:
+  - long-reverb
+  - chorus
+
+register: high
+
+ornamentation:
+  - arpeggio
+  - shimmer
+
+descriptors:
+  - luminous
+  - vast
+  - reverent
+
+bias:
+  energy: -0.05
+  complexity: 0.20
+  groove: -0.20
