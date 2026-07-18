@@ -1,0 +1,32 @@
+{
+  "name": "stratum",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Hexagonal bridge between Ableton Live 12 and a generative music vocabulary",
+  "type": "module",
+  "engines": {
+    "node": ">=22.23.1",
+    "pnpm": ">=8.15.0"
+  },
+  "packageManager": "pnpm@8.15.0",
+  "scripts": {
+    "build": "pnpm -r build",
+    "test": "pnpm -r test",
+    "test:watch": "pnpm -r test:watch",
+    "lint": "biome lint .",
+    "format:check": "biome format .",
+    "typecheck": "pnpm -r typecheck",
+    "prestatus": "pnpm --filter @stratum/dashboard build",
+    "status": "pnpm --filter @stratum/dashboard start",
+    "new:spec": "bash scripts/new-spec.sh",
+    "new:adr": "bash scripts/new-adr.sh",
+    "new:milestone": "bash scripts/new-milestone.sh",
+    "new:task": "bash scripts/new-task.sh"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "1.9.4",
+    "typescript": "5.6.3",
+    "vitest": "2.1.4",
+    "@types/node": "22.9.0"
+  }
+}
