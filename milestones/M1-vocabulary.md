@@ -2,12 +2,12 @@
 id: M1
 type: milestone
 title: "Musical Vocabulary"
-status: active
+status: shipped
 version: 0.1.0
 owner: hugo
 created: 2026-07-18
 updated: 2026-07-18
-related: [spec-0001]
+related: [spec-0001, spec-0002, spec-0003]
 tags: [m1, vocabulary]
 ---
 
