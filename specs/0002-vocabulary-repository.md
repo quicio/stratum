@@ -10,7 +10,7 @@ created: 2026-07-18
 updated: 2026-07-18
 milestone: M1
 related: [spec-0001]
-impl_progress: 0
+impl_progress: 100
 tags: [vocabulary, repository, m1]
 ---
 

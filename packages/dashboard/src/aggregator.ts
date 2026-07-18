@@ -53,8 +53,20 @@ export function aggregate(docs: ParsedDoc[]): Aggregated {
 }
 
 export function calculateMilestoneProgress(group: MilestoneGroup): number {
-  // Specs are the unit of milestone delivery; task status is displayed separately.
-  const items = group.specs;
+  // Only Implementation Specs count toward milestone delivery progress.
+  // Domain Specs define behavior; they have no implementation of their
+  // own (their semantics are realized by the Implementation Specs that
+  // specialize them). Averaging them in would understate real progress
+  // by dividing by a denominator that includes non-implementable items.
+  //
+  // The 'kind' field is optional in the schema and only present on
+  // spec frontmatter. We access it via a duck-typed lookup rather than
+  // through the discriminated Frontmatter type, which does not
+  // uniformly carry 'kind' across all variants.
+  const items = group.specs.filter(doc => {
+    const kind = (doc.frontmatter as { kind?: string }).kind;
+    return kind !== 'domain';
+  });
   if (items.length === 0) return 0;
   const sum = items.reduce((acc, doc) => acc + (doc.frontmatter.impl_progress ?? 0), 0);
   return Math.round(sum / items.length);
