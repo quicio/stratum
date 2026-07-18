@@ -3,7 +3,7 @@ id: spec-0003
 type: spec
 kind: implementation
 title: "SignatureFactory and Domain Types"
-status: draft
+status: approved
 version: 0.1.0
 owner: hugo
 created: 2026-07-18
@@ -28,9 +28,9 @@ This spec is TypeScript-specific. The vocabulary contract (spec-0001) and the re
 
 ---
 
-## Package Layout
+## Filesystem Layout
 
-The implementation lives in a new workspace package:
+The implementation lives in a new workspace package. The exact directory tree is illustrative; only the package boundary and the `src/` tree are normative.
 
 ```
 packages/vocabulary/
@@ -39,28 +39,36 @@ packages/vocabulary/
   tsconfig.build.json      # emits src only to dist/
   vitest.config.ts
   src/
-    domain/
-      types.ts             # zod schemas + inferred TS types
-      provenance.ts        # Provenance type + helpers
-    repository/
-      vocabulary-repository.ts   # implementation of spec-0002
-      errors.ts            # VocabularyLoadError + VocabularyIssue
-      file-loader.ts       # YAML file loading (private to repository)
-    factory/
-      signature-factory.ts        # the public factory
-      resolution.ts        # per-field precedence resolution
-      baseline.ts          # baseline computation
-      validation.ts        # validation rules from spec-0001
-    index.ts               # public exports
+    ...
   tests/
-    repository.test.ts
-    factory.test.ts
+    ...
     fixtures/
       valid/               # minimal valid vocabulary
       invalid/             # fixtures for failure cases
 ```
 
 The package depends on `zod` (runtime + types) and `yaml` (YAML parsing). No other runtime dependencies.
+
+## Module Structure
+
+The `src/` tree is normative. The grouping reflects the hexagonal separation of concerns, not the file system depth. Any change to this layout is an Implementation Spec change.
+
+| Path | Concern | Public? |
+|---|---|---|
+| `src/domain/types.ts` | zod schemas + inferred TS types for `Scale`, `Genre`, `Mood` | yes (types) |
+| `src/domain/provenance.ts` | `Provenance<T>` type, `ProvenanceSource` union, helper predicates | yes |
+| `src/repository/vocabulary-repository.ts` | concrete class implementing spec-0002's contract | yes |
+| `src/repository/errors.ts` | `VocabularyLoadError` and `VocabularyIssue` (see spec-0002 Error Model) | yes |
+| `src/repository/file-loader.ts` | YAML file discovery and parsing; private to the repository module | no |
+| `src/factory/signature-factory.ts` | the public `SignatureFactory` class | yes |
+| `src/factory/resolution.ts` | per-field precedence resolution algorithm | no (internal to factory) |
+| `src/factory/baseline.ts` | baseline computation | no (internal to factory) |
+| `src/factory/validation.ts` | validation rules derived from spec-0001 | no (internal to factory) |
+| `src/index.ts` | public re-exports | yes |
+
+`file-loader.ts` is internal to the repository module because the repository is the only component allowed to read YAML (spec-0002). It is not importable from outside `src/repository/`.
+
+The public surface of the package is: `VocabularyRepository`, `SignatureFactory`, the domain types (`Scale`, `Genre`, `Mood`, `MusicalSignature`, `Provenance`, `ProvenanceSource`), the `IntentResolver` type, and the error classes. Everything else is internal.
 
 ---
 
@@ -193,25 +201,7 @@ The constructor is private. The only public way to obtain a repository is `Vocab
 
 ### Error model
 
-```typescript
-export interface VocabularyIssue {
-  filePath: string;
-  kind: 'parse' | 'schema' | 'filename' | 'missing-dir' | 'missing-file';
-  message: string;
-}
-
-export class VocabularyLoadError extends Error {
-  constructor(
-    public readonly rootDir: string,
-    public readonly issues: readonly VocabularyIssue[],
-  ) {
-    super(`Vocabulary load failed with ${issues.length} issue(s) under ${rootDir}`);
-    this.name = 'VocabularyLoadError';
-  }
-}
-```
-
-The error aggregates every issue found during a load. The repository never returns a partial state.
+The concrete error types live in `src/repository/errors.ts`. Their shape, fields, and aggregation semantics are defined in spec-0002's Error Model section; this Implementation Spec does not redefine them. Implementation note: the `kind` literal union is `'parse' | 'schema' | 'filename' | 'missing-dir' | 'missing-file'`, matching spec-0002 exactly.
 
 ### Atomicity
 
@@ -434,3 +424,16 @@ The factory never invents values. If a required field has no source after the pr
 - Performance axis extension (e.g. `density`, `brightness`) when spec-0001 grows.
 - Cache layer for resolved signatures (currently resolved on every call).
 - The Intent Resolver contract (spec-0004) will define the full port; v1 here is a minimal hook.
+
+---
+
+## Non-Goals
+
+This Implementation Spec explicitly excludes:
+
+- **Effect catalog**: a curated set of effect identifiers (e.g. `cavern-delay`, `long-reverb`) referenced by `Mood.effects`. The repository treats them as opaque strings; the catalog itself is a future spec.
+- **Rhythm signature catalog**: a curated set of `genre.rhythm_signature` values (e.g. `four-on-the-floor`). The repository validates the field as a string; the catalog is a future spec.
+- **Performance axis beyond the four defined in spec-0001** (`tempo`, `energy`, `complexity`, `groove`): no `density`, `brightness`, or any other axis. The set is closed in M1.
+- **Composition generation**: this spec is domain-only. MIDI generation, audio stem rendering, and the Composition Engine are spec-0005+ (M2).
+- **Live bridge integration**: any reference to Ableton Live, OSC, MCP, or `.als` files is out of scope. Those are M3.
+- **Cross-vocabulary cross-references**: the repository validates intra-file schema only. A future spec will add cross-references to catalogs (effect, rhythm signature, etc.).
