@@ -1,0 +1,89 @@
+#!/usr/bin/env node
+// .githooks/pre-push
+//
+// Refuses to push when the working tree has uncommitted changes or
+// when files are not yet tracked by git. Reasoning lives in
+// docs/workflow.md, rule 1 ("Commit first, reorganize later") and
+// rule 4 ("Push only clean branches").
+//
+// To bypass in an emergency: `git push --no-verify`. Document why in
+// the commit message.
+
+import { execSync } from 'node:child_process';
+
+function gitStatusPorcelain() {
+  return execSync('git status --porcelain', { encoding: 'utf-8' });
+}
+
+function isInMergeOrRebase() {
+  try {
+    const dirs = [
+      '.git/MERGE_HEAD',
+      '.git/REBASE_HEAD',
+      '.git/REBASE_APPLY',
+      '.git/REBASE_MERGE',
+      '.git/CHERRY_PICK_HEAD',
+      '.git/REVERT_HEAD',
+    ];
+    const fs = require('node:fs');
+    return dirs.some((p) => fs.existsSync(p));
+  } catch {
+    return false;
+  }
+}
+
+function main() {
+  // During a rebase/merge we want the push to go through so the user
+  // can resolve the situation. The hook is about everyday pushes.
+  if (isInMergeOrRebase()) {
+    process.exit(0);
+  }
+
+  const porcelain = gitStatusPorcelain();
+  if (porcelain.trim() === '') {
+    process.exit(0);
+  }
+
+  const lines = porcelain.split('\n').filter(Boolean);
+
+  // Classify changes so the message is useful.
+  // Git porcelain v1 two-letter codes: M=modified, A=added (staged),
+  // D=deleted, R=renamed, C=copied, U=unmerged, !=modified+untracked.
+  const X = /^[MADRCU! ][MADRCU! ]\s/;
+  const untracked = lines.filter((l) => l.startsWith('??'));
+  const staged = lines.filter(
+    (l) => X.test(l) && l[0] !== ' ' && l[0] !== '?',
+  );
+  const unstaged = lines.filter(
+    (l) => X.test(l) && l[0] === ' ' && l[1] !== '?',
+  );
+  const other = lines.filter(
+    (l) => !X.test(l) && !l.startsWith('??'),
+  );
+
+  const summary = [];
+  if (staged.length) summary.push(`${staged.length} staged (uncommitted)`);
+  if (unstaged.length) summary.push(`${unstaged.length} unstaged`);
+  if (untracked.length) summary.push(`${untracked.length} untracked`);
+  if (other.length) summary.push(`${other.length} other`);
+
+  process.stderr.write('\nstratum pre-push: refusing to push a dirty tree.\n');
+  process.stderr.write(`  ${summary.join(', ')}\n\n`);
+  process.stderr.write('Why this matters: docs/workflow.md, rule 4.\n\n');
+  process.stderr.write('Fix:\n');
+  process.stderr.write('  - Commit valuable changes:   git add -A && git commit\n');
+  process.stderr.write('  - Drop unwanted changes:     git checkout -- <paths>\n');
+  process.stderr.write('  - Stash for later:           git stash push -u -m "wip"\n');
+  process.stderr.write('  - Bypass (emergency only):   git push --no-verify\n\n');
+  process.stderr.write('First 10 changes:\n');
+  for (const line of lines.slice(0, 10)) {
+    process.stderr.write(`  ${line}\n`);
+  }
+  if (lines.length > 10) {
+    process.stderr.write(`  ... and ${lines.length - 10} more\n`);
+  }
+  process.stderr.write('\n');
+  process.exit(1);
+}
+
+main();
